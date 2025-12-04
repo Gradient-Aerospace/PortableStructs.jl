@@ -1,0 +1,19 @@
+name = "PortableStructs"
+uuid = "b33d0e21-58ed-44e8-a1cd-54bcd6317649"
+version = "0.1.0"
+authors = ["Tucker McClure <tucker@gradient.team>"]
+
+[workspace]
+projects = ["test"]
+
+[deps]
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
+
+[compat]
+InteractiveUtils = "1.11.0"
+OrderedCollections = "1.8.1"
+StaticArrays = "1.9.15"
+YAML = "0.4.16"
