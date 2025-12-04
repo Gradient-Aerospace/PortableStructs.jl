@@ -1,0 +1,37 @@
+# PortableStructs.jl
+
+This package provides an easy way to write out structs as YAML/JSON and also to load YAML/JSON and populate the appropriate struct.
+
+It is easy to write (most) structs-of-structs out to a YAML file:
+
+```
+import PortableStructs
+PortableStructs.write_to_yaml("file.yaml", my_struct)
+```
+
+It is similarly easy to load from YAML:
+
+```
+my_struct = PortableStructs.load_from_yaml("file.yaml")
+```
+
+The loaded structure will in general have the same native Julia types as the original.
+
+Where the type you wish to load as is known, that can be provided:
+
+```
+my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
+```
+
+This package is meant to be simple, and that simplicity comes from several constraints:
+
+* The user's structs will be constructed entirely from keyword arguments, one for each field, so they must have constructors that support this (such as by adding `@kwdef` in front of the struct definition).
+* The type of each struct will show up in the YAML file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
+* This isn't meant to be fast or efficient.
+
+There is overlap with the functionality in StructTypes. This package is not as flexible as that one, but it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.
+
+Design notes:
+
+* We could potentially put `load_from_yaml` in a YAML extension, `load_from_json` in a JSON extension, etc.
+* The key reason this package exists, instead of just using StructTypes, is that this handles abstract types where the potential subtypes of the abstract type aren't known (one can't write a `StructTypes.subtypes` function to resolve which abstract type should be constructed).
