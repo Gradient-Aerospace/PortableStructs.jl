@@ -23,6 +23,52 @@ Where the type you wish to load as is known, that can be provided:
 my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
 ```
 
+Here's an example.
+
+```
+@enum Status DoingWell DoingPoorly
+@kwdef struct Position{T}
+    x::T
+    y::T
+    z::T
+end
+@kwdef struct MyType
+    name::String
+    position::Position{Float64}
+    status::Status
+end
+
+x = MyType("My Name", Position(1., 2., 3.), DoingWell)
+
+import PortableStructs
+PortableStructs.write_to_yaml("my_struct.yaml", x)
+```
+
+Here's what the YAML looks like:
+
+```
+type: "MyType"
+name: "My Name"
+position:
+  type: "Position"
+  x: 1.0
+  y: 2.0
+  z: 3.0
+status: "DoingWell"
+```
+
+We can load that back in like so:
+
+```
+y = PortableStructs.load_from_yaml("my_struct.yaml")
+```
+
+giving:
+
+```
+MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
+```
+
 This package is meant to be simple, and that simplicity comes from several constraints:
 
 * The user's structs will be constructed entirely from keyword arguments, one for each field, so they must have constructors that support this (such as by adding `@kwdef` in front of the struct definition).
