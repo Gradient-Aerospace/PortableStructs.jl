@@ -16,6 +16,7 @@ using PortableStructs
     i::Char
     j::Fruit
     k::SVector{3, Float64}
+    l::NamedTuple{(:x, :y), Tuple{Int64, Float64}}
 end
 
 function Base.:(==)(a::MyConcreteType, b::MyConcreteType)
@@ -35,6 +36,7 @@ end
     l::Union{Nothing, MyConcreteType}
     m::Union{Nothing, MyConcreteType}
     n::Real
+    o::NamedTuple
 end
 
 @kwdef struct MyTypeWithAFieldCalledType
@@ -53,7 +55,8 @@ end
 
     # Create an instance of the type and write it to YAML.
     x = MyConcreteType(
-        1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', guava, SA[9., 10., 11.]
+        1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', guava,
+        SA[9., 10., 11.], (; x = 1, y = 2.),
     )
     mkpath("out")
     write_to_yaml("out/my_concrete_type.yaml", x)
@@ -93,8 +96,8 @@ end
 @testset "more complex fields" begin
 
     x = MyConcreteType(
-        1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', cantaloupe, 
-        SA[9., 10., 11.]
+        1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', cantaloupe,
+        SA[9., 10., 11.], (; x = 1, y = 2.),
     )
     y = TypeWithMoreComplexFields(
         x,
@@ -103,10 +106,11 @@ end
         ("hi", x),
         [1., 2, "3", [4., 5.], 6//1, 7. + 8im, x],
         nothing, x, 1.,
+        (; z = "butternut squash", ),
     )
 
     mkpath("out")
-    write_to_yaml("out/my_type_with_more_complex_fields.yaml", y)   
+    write_to_yaml("out/my_type_with_more_complex_fields.yaml", y)
 
     z = load_from_yaml("out/my_type_with_more_complex_fields.yaml")
     for fn in fieldnames(TypeWithMoreComplexFields)
