@@ -28,21 +28,21 @@ This package is meant to be simple, and that simplicity comes from several const
   field, so they must have constructors that support this (such as by adding `@kwdef` in
   front of the struct definition).
 * The type of each struct will show up in the YAML file with a key called "type" (or
-  whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and 
+  whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and
   `load_from_yaml`). Hence no struct is allowed have a field with this name.
 * This isn't meant to be fast or efficient.
 
 There is overlap with the functionality in StructTypes. This package is not as flexible as
-that one, but it's simpler to make an arbitrary struct work with this package (generally, 
+that one, but it's simpler to make an arbitrary struct work with this package (generally,
 the user need not do anything at all!) than with StructTypes.
 
 Design notes:
 
-* We could potentially put `load_from_yaml` in a YAML extension, `load_from_json` in a JSON 
+* We could potentially put `load_from_yaml` in a YAML extension, `load_from_json` in a JSON
   extension, etc.
-* The key reason this package exists, instead of just using StructTypes, is that this 
+* The key reason this package exists, instead of just using StructTypes, is that this
   handles abstract types where the potential subtypes of the abstract type aren't known (one
-  can't write a `StructTypes.subtypes` function to resolve which abstract type should be 
+  can't write a `StructTypes.subtypes` function to resolve which abstract type should be
   constructed).
 """
 module PortableStructs
@@ -143,11 +143,19 @@ function from_dict(::Type{SVector{N, ET}}, v::Vector; kwargs...) where {N, ET}
     return SVector{N, ET}(from_dict(ET, el; kwargs...) for el in v)
 end
 
-# If we seek a named tuple but have a dict, let the keys be the names.
-function from_dict(::Type{T}, v::AbstractDict{<:AbstractString, <:Any}; kwargs...) where {T <: NamedTuple}
+# If we seek a fully characterized named tuple but have a dict, let the keys be the names.
+function from_dict(::Type{NamedTuple{F, T}}, v::AbstractDict{<:AbstractString, <:Any}; kwargs...) where {F, T}
     return NamedTuple(
         fn => from_dict(ft, v[string(fn)]; kwargs...)
-        for (fn, ft) in zip(fieldnames(T), fieldtypes(T))
+        for (fn, ft) in zip(F, fieldtypes(T))
+    )
+end
+
+# If we seek a generic named tuple but have a dict, let the keys be the names.
+function from_dict(::Type{NamedTuple}, v::AbstractDict{<:AbstractString, <:Any}; kwargs...)
+    return NamedTuple(
+        Symbol(key) => from_dict(Any, el; kwargs...)
+        for (key, el) in pairs(v)
     )
 end
 
@@ -169,9 +177,9 @@ from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Complex} = T(nt.re, nt.i
 # it with keyword arguments. We'll use each field's type to construct each value of the
 # keyword arguments.
 #
-# But if the type we're constructing is abstract, we need to see which concrete thing to 
+# But if the type we're constructing is abstract, we need to see which concrete thing to
 # construct. We'll look for a "type" field that tells us. However, that will be a string.
-# How do we get the corresponding type? We could just evaluate the string as an expression, 
+# How do we get the corresponding type? We could just evaluate the string as an expression,
 # but we're prefer to avoid direct evaluation of expressions here. Instead, we'll see if
 # we can find any subtype of the sought type whose string representation matches what's
 # coming from the dictionary. This involves using subtypes, which means we depend on
