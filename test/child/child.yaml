@@ -1,0 +1,6 @@
+type: Person
+name: "Parent"
+sibling:
+  _include: "sibling.yaml" # In the same directory as this file
+  name: "Sis" # Overwrite their name with what we like to call them.
+child: { _include: "grandchildren/grandchild1.yaml" } # In a subdirectory from this one.

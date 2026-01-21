@@ -252,6 +252,44 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
     error("Could not construct a $T from the given dictionary. Adding a \"$type_key\" key would help resolve which type to construct.")
 end
 
+# Replace "include" with a dictionary loaded from the given file name.
+function expand_include_files(d, dir; include_key = "include")
+
+    # First, do this recursively on all keys that are dictionaries.
+    for k in keys(d)
+        if k !== include_key && d[k] isa AbstractDict
+            d[k] = expand_include_files(d[k], dir; include_key)
+        end
+    end
+
+    # Now if there's an "include" in there, load that file, and expand it the same way we
+    # were expanded.
+    if haskey(d, include_key) && d[include_key] isa AbstractString
+
+        # See if we should use the given file name (absolute path) or join it with our
+        # current path. Also, remove that key.
+        filename = if isabspath(d[include_key])
+            d[include_key]
+        else
+            joinpath(dir, d[include_key])
+        end
+        delete!(d, include_key)
+
+        # Now do exactly the same thing that was done to get here in the first place.
+        subdict = YAML.load_file(filename; dicttype = OrderedDict{String, Any})
+        subdict = expand_include_files(subdict, dirname(filename); include_key)
+
+        # Let any other keys in the dictionary overwrite what we loaded (the parent is
+        # allowed to overwrite the child).
+        d = merge(subdict, d)
+
+    end
+
+    # Return the possibly updated, possibly completely replaced dictionary.
+    return d
+
+end
+
 """
     load_from_yaml(filename [, t::Type]; kwargs...)
 
@@ -263,8 +301,16 @@ Keyword arguments:
   in construction. Default: "type".
 * `base_module`: The module to search for types called out in the YAML file. Default: Main
 """
-function load_from_yaml(filename::AbstractString, t::Type; type_key = "type", base_module = Main)
+function load_from_yaml(
+    filename::AbstractString,
+    t::Type;
+    type_key = "type",
+    base_module = Main,
+    include_key = "include",
+)
+    dir = dirname(filename)
     dict = YAML.load_file(filename; dicttype = OrderedDict{String, Any})
+    dict = expand_include_files(dict, dir; include_key)
     return from_dict(t, dict; type_key, base_module)
 end
 

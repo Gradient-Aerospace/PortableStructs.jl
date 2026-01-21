@@ -52,6 +52,12 @@ end
     b::Complex{Float64}
 end
 
+@kwdef struct Person
+    name::String
+    child::Union{Person, Nothing} = nothing
+    sibling::Union{Person, Nothing} = nothing
+end
+
 # Here, we know what the "left hand side" is supposed to be for all fields, so this is the
 # easy stuff.
 @testset "concrete type of types" begin
@@ -131,5 +137,13 @@ end
     x = load_from_yaml("manual.yaml", MyManualType)
     @test x.a == 1//2
     @test x.b == 3.0 + 4im
+
+    # Check that "include" works as advertised through multiple directories and local paths.
+    grandma = load_from_yaml("grandma.yaml", Person; include_key = "_include")
+    @test grandma.name == "Grandma"
+    @test grandma.child.name == "Parent"
+    @test grandma.child.sibling.name == "Sis" # Tests that we can overwrite an include.
+    @test grandma.child.child.name == "Grandchild 1"
+    @test grandma.child.child.sibling.name == "Grandchild 2"
 
 end
