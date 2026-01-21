@@ -1,6 +1,7 @@
 using Test
 using StaticArrays
 using PortableStructs
+using Random: Xoshiro
 
 @enum Fruit guava cantaloupe
 
@@ -17,6 +18,8 @@ using PortableStructs
     j::Fruit
     k::SVector{3, Float64}
     l::NamedTuple{(:x, :y), Tuple{Int64, Float64}}
+    o::Xoshiro
+    p::UInt64
 end
 
 function Base.:(==)(a::MyConcreteType, b::MyConcreteType)
@@ -56,7 +59,7 @@ end
     # Create an instance of the type and write it to YAML.
     x = MyConcreteType(
         1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', guava,
-        SA[9., 10., 11.], (; x = 1, y = 2.),
+        SA[9., 10., 11.], (; x = 1, y = 2.), Xoshiro(123), -0x1,
     )
     mkpath("out")
     write_to_yaml("out/my_concrete_type.yaml", x)
@@ -97,7 +100,7 @@ end
 
     x = MyConcreteType(
         1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', cantaloupe,
-        SA[9., 10., 11.], (; x = 1, y = 2.),
+        SA[9., 10., 11.], (; x = 1, y = 2.), Xoshiro(123), -0x1,
     )
     y = TypeWithMoreComplexFields(
         x,
