@@ -116,6 +116,11 @@ function from_dict(t::Type{<:Enum}, v::String; kwargs...)
     error("\"$v\" did not map to any enum of type $t.")
 end
 
+# Not all strings can become symbols, but we'll give it a try.
+function from_dict(t::Type{Symbol}, v::String; kwargs...)
+    return Symbol(v)
+end
+
 # If we need a dict with string keys, well, that's what the RHS is already, right? But we
 # still need to dive in and attempt to from_dict each element.
 function from_dict(::Type{T}, v::AbstractDict; kwargs...) where {T <: AbstractDict{String, VT}} where {VT}
@@ -208,16 +213,8 @@ from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Complex} = T(nt.re, nt.i
 #
 function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {T}
     # println("Constructing a $T...")
-    if isconcretetype(T)
-        # println("This type is concrete, so we can construct it directly.")
-        return from_named_tuple(
-            T,
-            NamedTuple(
-                Symbol(k) => from_dict(fieldtype(T, Symbol(k)), v; type_key, base_module)
-                for (k, v) in pairs(dict) if k != type_key
-            ),
-        )
-    elseif haskey(dict, type_key)
+    if haskey(dict, type_key)
+        # println("This type has a type_key, so we will first construct that type.")
         type_string = dict[type_key]
         module_name = base_module
         module_path = split(type_string, ".")
@@ -235,21 +232,29 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
         catch err
             error("The $type_symbol type could not be found in $module_name.")
         end
-        # return from_dict(type, dict; type_key, base_module)
-        for (k, v) in pairs(dict)
-            if k != type_key
-                Symbol(k) => from_dict(fieldtype(type, Symbol(k)), v; type_key, base_module)
-            end
-        end
-        return from_named_tuple(
+        value = from_named_tuple(
             type,
             NamedTuple(
                 Symbol(k) => from_dict(fieldtype(type, Symbol(k)), v; type_key, base_module)
                 for (k, v) in pairs(dict) if k != type_key
             ),
         )
+        if value isa T
+            return value
+        else
+            return convert(T, value)
+        end
+    elseif isconcretetype(T)
+        # println("This type is concrete, so we can construct it directly.")
+        return from_named_tuple(
+            T,
+            NamedTuple(
+                Symbol(k) => from_dict(fieldtype(T, Symbol(k)), v; type_key, base_module)
+                for (k, v) in pairs(dict) if k != type_key
+            ),
+        )
     end
-    error("Could not construct a $T from the given dictionary. Adding a \"$type_key\" key would help resolve which type to construct.")
+    error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
 end
 
 # Replace "include" with a dictionary loaded from the given file name.
@@ -330,6 +335,7 @@ to_dict(v::Unsigned; kwargs...) = string(v) # Numbers load as Int64 which can't 
 to_dict(v::Union{Integer, AbstractFloat, AbstractIrrational}; kwargs...) = v
 to_dict(v::AbstractString; kwargs...) = v
 to_dict(v::AbstractChar; kwargs...) = v
+to_dict(v::Symbol; kwargs...) = string(v)
 to_dict(v::Enum; kwargs...) = string(v)
 to_dict(v::AbstractVector; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::Tuple; kwargs...) = [to_dict(el; kwargs...) for el in v]
