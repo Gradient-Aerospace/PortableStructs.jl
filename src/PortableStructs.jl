@@ -196,6 +196,7 @@ arguments.
 from_named_tuple(::Type{T}, named_tuple::NamedTuple) where {T} = T(; named_tuple...)
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Rational} = T(nt.num, nt.den)
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Complex} = T(nt.re, nt.im)
+from_named_tuple(f::Function, nt::NamedTuple) = f(; nt...)
 
 # Here's the big one. For constructing general composite types, there are really two
 # different cases to handle. If the type we seek is concrete, then we can try to construct
