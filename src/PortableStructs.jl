@@ -121,6 +121,15 @@ function from_dict(t::Type{Symbol}, v::String; kwargs...)
     return Symbol(v)
 end
 
+# If we want some other type, and we have a string, try to parse as that type.
+function from_dict(t::Type{T}, v::String; kwargs...) where {T}
+    if String <: T
+        return v # I'm not sure why dispatch doesn't already do this.
+    else
+        return parse(t, v)
+    end
+end
+
 # If we need a dict with string keys, well, that's what the RHS is already, right? But we
 # still need to dive in and attempt to from_dict each element.
 function from_dict(::Type{T}, v::AbstractDict; kwargs...) where {T <: AbstractDict{String, VT}} where {VT}

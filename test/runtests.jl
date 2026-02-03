@@ -5,6 +5,11 @@ using Random: Xoshiro
 
 @enum Fruit guava cantaloupe
 
+struct MyParseableType
+    int::Int64
+end
+Base.parse(::Type{MyParseableType}, s::AbstractString) = MyParseableType(parse(Int64, s))
+
 @kwdef struct MyConcreteType
     a::Float64
     b::Int64
@@ -50,6 +55,7 @@ end
 @kwdef struct MyManualType
     a::Rational{Int64}
     b::Complex{Float64}
+    c::MyParseableType
 end
 
 @kwdef struct Person
@@ -137,6 +143,8 @@ end
     x = load_from_yaml("manual.yaml", MyManualType)
     @test x.a == 1//2
     @test x.b == 3.0 + 4im
+    @test x.c isa MyParseableType
+    @test x.c.int == 1
 
     # Check that "include" works as advertised through multiple directories and local paths.
     grandma = load_from_yaml("grandma.yaml", Person; include_key = "_include")
