@@ -121,6 +121,15 @@ function from_dict(t::Type{Symbol}, v::String; kwargs...)
     return Symbol(v)
 end
 
+# If we want some other type, and we have a string, try to parse as that type.
+function from_dict(t::Type{T}, v::String; kwargs...) where {T}
+    if String <: T
+        return v # I'm not sure why dispatch doesn't already do this.
+    else
+        return parse(t, v)
+    end
+end
+
 # If we need a dict with string keys, well, that's what the RHS is already, right? But we
 # still need to dive in and attempt to from_dict each element.
 function from_dict(::Type{T}, v::AbstractDict; kwargs...) where {T <: AbstractDict{String, VT}} where {VT}
@@ -196,6 +205,7 @@ arguments.
 from_named_tuple(::Type{T}, named_tuple::NamedTuple) where {T} = T(; named_tuple...)
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Rational} = T(nt.num, nt.den)
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Complex} = T(nt.re, nt.im)
+from_named_tuple(f::Function, nt::NamedTuple) = f(; nt...)
 
 # Here's the big one. For constructing general composite types, there are really two
 # different cases to handle. If the type we seek is concrete, then we can try to construct
