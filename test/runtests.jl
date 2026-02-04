@@ -2,6 +2,8 @@ using Test
 using StaticArrays
 using PortableStructs
 using Random: Xoshiro
+using OrderedCollections: OrderedDict
+using YAML: load_file
 
 @enum Fruit guava cantaloupe
 
@@ -62,6 +64,43 @@ end
     name::String
     child::Union{Person, Nothing} = nothing
     sibling::Union{Person, Nothing} = nothing
+end
+
+# Suppose we wanted a type that didn't write all of its fields to YAML. Consider a type
+# that contains a big data vector loaded from a file. We don't need to save all of that data
+# and could instead save just the file name.
+struct CustomRepresentation
+    filename::String
+    contents::Vector{UInt8}
+end
+function CustomRepresentation(; filename)
+    # "Load the data." (No need to actually load a file here.)
+    contents = zeros(UInt8, length(filename))
+    return CustomRepresentation(filename, contents)
+end
+function PortableStructs.to_dict(c::CustomRepresentation; type_key, kwargs...)
+    return OrderedDict(
+        type_key => "CustomRepresentation",
+        "filename" => c.filename, # Save just the file name.
+    )
+end
+function PortableStructs.from_dict(::Type{CustomRepresentation}, d::AbstractDict; kwargs...)
+    # When loading, re-load the file.
+    return CustomRepresentation(; filename = d["filename"])
+end
+
+@testset "custom to_dict and from_dict" begin
+
+    file = "out/my_custom_type.yaml"
+    c = CustomRepresentation(; filename = "abalone.txt")
+    write_to_yaml(file, c)
+    yaml = load_file(file)
+    @test length(keys(yaml)) == 2
+    @test haskey(yaml, "type")
+    @test haskey(yaml, "filename")
+    c2 = load_from_yaml(file, CustomRepresentation)
+    @test c.contents == c2.contents
+
 end
 
 # Here, we know what the "left hand side" is supposed to be for all fields, so this is the
