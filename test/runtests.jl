@@ -89,19 +89,8 @@ function PortableStructs.from_dict(::Type{CustomRepresentation}, d::AbstractDict
     return CustomRepresentation(; filename = d["filename"])
 end
 
-@testset "custom to_dict and from_dict" begin
-
-    file = "out/my_custom_type.yaml"
-    c = CustomRepresentation(; filename = "abalone.txt")
-    write_to_yaml(file, c)
-    yaml = load_file(file)
-    @test length(keys(yaml)) == 2
-    @test haskey(yaml, "type")
-    @test haskey(yaml, "filename")
-    c2 = load_from_yaml(file, CustomRepresentation)
-    @test c.contents == c2.contents
-
-end
+# We'll put all of our output files here.
+mkpath("out")
 
 # Here, we know what the "left hand side" is supposed to be for all fields, so this is the
 # easy stuff.
@@ -112,7 +101,6 @@ end
         1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', guava,
         SA[9., 10., 11.], (; x = 1, y = 2.), Xoshiro(123), -0x1,
     )
-    mkpath("out")
     write_to_yaml("out/my_concrete_type.yaml", x)
 
     # Load in the YAML and see if everything's as it was.
@@ -192,5 +180,19 @@ end
     @test grandma.child.sibling.name == "Sis" # Tests that we can overwrite an include.
     @test grandma.child.child.name == "Grandchild 1"
     @test grandma.child.child.sibling.name == "Grandchild 2"
+
+end
+
+@testset "custom to_dict and from_dict" begin
+
+    file = "out/my_custom_type.yaml"
+    c = CustomRepresentation(; filename = "abalone.txt")
+    write_to_yaml(file, c)
+    yaml = load_file(file)
+    @test length(keys(yaml)) == 2
+    @test haskey(yaml, "type")
+    @test haskey(yaml, "filename")
+    c2 = load_from_yaml(file, CustomRepresentation)
+    @test c.contents == c2.contents
 
 end
