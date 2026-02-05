@@ -193,6 +193,7 @@ end
     @test haskey(yaml, "type")
     @test haskey(yaml, "filename")
     c2 = load_from_yaml(file, CustomRepresentation)
+    @test c.filename == c2.filename
     @test c.contents == c2.contents
 
 end
