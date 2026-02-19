@@ -69,11 +69,14 @@ giving:
 MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
 ```
 
+The `type` can be a type or a function to call with keyword arguments.
+
+A YAML file can be "included" at any level. This allows the user to break up a large YAML file into smaller ones. By default, the key `include` will be used to indicate what file to include. The `include_key` keyword argument to `load_from_yaml` can specify a different key to use (e.g., `_include`). When including files, the file name is assumed to be relative to the file that has the "include" in it (or an absolute path).
+
 This package is meant to be simple, and that simplicity comes from several constraints:
 
 * The user's structs will be constructed entirely from keyword arguments, one for each field, so they must have constructors that support this (such as by adding `@kwdef` in front of the struct definition).
 * The type of each struct will show up in the YAML file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
-* A YAML file can be "included" at any level. This allows the user to break up a large YAML file into smaller ones. By default, the key `include` will be used to indicate what file to include. The `include_key` keyword argument to `load_from_yaml` can specify a different key to use (e.g., `_include`). When including files, the file name is assumed to be relative to the file that has the "include" in it (or an absolute path).
 * This isn't meant to be fast or efficient.
 
 There is overlap with the functionality in StructTypes. This package is not as flexible as that one, but it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.
