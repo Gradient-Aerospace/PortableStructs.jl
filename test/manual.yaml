@@ -1,3 +1,7 @@
 a: 1//2
 b: 3.0 + 4.0im
 c: "1"
+d:
+  type: a_function_to_call
+  x: 1
+  y: "cats"

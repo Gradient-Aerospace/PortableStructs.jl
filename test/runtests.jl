@@ -58,6 +58,11 @@ end
     a::Rational{Int64}
     b::Complex{Float64}
     c::MyParseableType
+    d::Tuple{Int64, String}
+end
+
+function a_function_to_call(; x::Int64, y::String)
+    return (x, y)
 end
 
 @kwdef struct Person
@@ -172,6 +177,8 @@ end
     @test x.b == 3.0 + 4im
     @test x.c isa MyParseableType
     @test x.c.int == 1
+    @test x.d[1] == 1
+    @test x.d[2] == "cats"
 
     # Check that "include" works as advertised through multiple directories and local paths.
     grandma = load_from_yaml("grandma.yaml", Person; include_key = "_include")

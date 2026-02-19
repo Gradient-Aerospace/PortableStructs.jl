@@ -207,6 +207,23 @@ from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Rational} = T(nt.num, nt
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Complex} = T(nt.re, nt.im)
 from_named_tuple(f::Function, nt::NamedTuple) = f(; nt...)
 
+# For types, expect to from_dict all of the children using the types of the type's fields.
+function get_children(type::Type, dict; type_key, base_module)
+    return NamedTuple(
+        Symbol(k) => from_dict(fieldtype(type, Symbol(k)), v; type_key, base_module)
+        for (k, v) in pairs(dict) if k != type_key
+    )
+end
+
+# For functions, we don't know anything about what types it requires, so we load everything
+# as an Any.
+function get_children(::Function, dict; type_key, base_module)
+    return NamedTuple(
+        Symbol(k) => from_dict(Any, v; type_key, base_module)
+        for (k, v) in pairs(dict) if k != type_key
+    )
+end
+
 # Here's the big one. For constructing general composite types, there are really two
 # different cases to handle. If the type we seek is concrete, then we can try to construct
 # it with keyword arguments. We'll use each field's type to construct each value of the
@@ -240,15 +257,9 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
             # println("Found $type_string in $module_name")
             getfield(module_name, type_symbol)
         catch err
-            error("The $type_symbol type could not be found in $module_name.")
+            error("The $type_symbol type/function could not be found in $module_name.")
         end
-        value = from_named_tuple(
-            type,
-            NamedTuple(
-                Symbol(k) => from_dict(fieldtype(type, Symbol(k)), v; type_key, base_module)
-                for (k, v) in pairs(dict) if k != type_key
-            ),
-        )
+        value = from_named_tuple(type, get_children(type, dict; type_key, base_module))
         if value isa T
             return value
         else
@@ -256,13 +267,7 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
         end
     elseif isconcretetype(T)
         # println("This type is concrete, so we can construct it directly.")
-        return from_named_tuple(
-            T,
-            NamedTuple(
-                Symbol(k) => from_dict(fieldtype(T, Symbol(k)), v; type_key, base_module)
-                for (k, v) in pairs(dict) if k != type_key
-            ),
-        )
+        return from_named_tuple(T, get_children(T, dict; type_key, base_module))
     end
     error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
 end
