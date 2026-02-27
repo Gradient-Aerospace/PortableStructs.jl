@@ -25,6 +25,7 @@ Base.parse(::Type{MyParseableType}, s::AbstractString) = MyParseableType(parse(I
     j::Fruit
     k::SVector{3, Float64}
     l::NamedTuple{(:x, :y), Tuple{Int64, Float64}}
+    m::Symbol
     o::Xoshiro
     p::UInt64
 end
@@ -104,7 +105,7 @@ mkpath("out")
     # Create an instance of the type and write it to YAML.
     x = MyConcreteType(
         1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', guava,
-        SA[9., 10., 11.], (; x = 1, y = 2.), Xoshiro(123), -0x1,
+        SA[9., 10., 11.], (; x = 1, y = 2.), :pika, Xoshiro(123), -0x1,
     )
     write_to_yaml("out/my_concrete_type.yaml", x)
 
@@ -144,7 +145,7 @@ end
 
     x = MyConcreteType(
         1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', cantaloupe,
-        SA[9., 10., 11.], (; x = 1, y = 2.), Xoshiro(123), -0x1,
+        SA[9., 10., 11.], (; x = 1, y = 2.), :pika, Xoshiro(123), -0x1,
     )
     y = TypeWithMoreComplexFields(
         x,
