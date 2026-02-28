@@ -38,7 +38,7 @@ function Base.:(==)(a::MyConcreteType, b::MyConcreteType)
     )
 end
 
-@kwdef struct TypeWithMoreComplexFields
+@kwdef struct TypeWithMoreComplexFields{N}
     g::MyConcreteType
     h::Vector{MyConcreteType}
     i::NTuple{2, MyConcreteType}
@@ -48,6 +48,7 @@ end
     m::Union{Nothing, MyConcreteType}
     n::Real
     o::NamedTuple
+    p::SVector{N, Symbol} # The type parameter means the size of this isn't known from the type when loading from YAML.
 end
 
 @kwdef struct MyTypeWithAFieldCalledType
@@ -155,6 +156,7 @@ end
         [1., 2, "3", [4., 5.], 6//1, 7. + 8im, x],
         nothing, x, 1.,
         (; z = "butternut squash", ),
+        SA[:a, :b],
     )
 
     mkpath("out")

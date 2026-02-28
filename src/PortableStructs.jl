@@ -155,6 +155,10 @@ end
 function from_dict(::Type{SVector{N, ET}}, v::Vector; kwargs...) where {N, ET}
     return SVector{N, ET}(from_dict(ET, el; kwargs...) for el in v)
 end
+function from_dict(t::Type{<:SVector}, v::Vector; kwargs...) # Length is unknown
+    els = [from_dict(eltype(t), el; kwargs...) for el in v]
+    return SVector{length(els), eltype(t)}(els)
+end
 
 # TODO: Move this to an extension.
 # Xoshiro has no keyword constructor, so we make a from_dict method that constructs a
