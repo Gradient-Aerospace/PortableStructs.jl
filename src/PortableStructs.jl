@@ -145,6 +145,10 @@ end
 function from_dict(::Type{NTuple{N, ET}}, v::Vector; kwargs...) where {N, ET}
     return Tuple(from_dict(ET, el; kwargs...) for el in v)
 end
+function from_dict(t::Type{<:NTuple}, v::Vector; kwargs...) # Length is unknown
+    els = [from_dict(eltype(t), el; kwargs...) for el in v]
+    return NTuple{length(els), eltype(t)}(els)
+end
 
 # Tuples (that aren't NTuples) involve from_dicting each element from its individual type.
 function from_dict(::Type{T}, v::Vector; kwargs...) where {T <: Tuple}
