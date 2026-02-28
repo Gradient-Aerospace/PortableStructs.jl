@@ -49,6 +49,7 @@ end
     n::Real
     o::NamedTuple
     p::SVector{N, Symbol} # The type parameter means the size of this isn't known from the type when loading from YAML.
+    q::NTuple{N, Float64}
 end
 
 @kwdef struct MyTypeWithAFieldCalledType
@@ -157,6 +158,7 @@ end
         nothing, x, 1.,
         (; z = "butternut squash", ),
         SA[:a, :b],
+        (0., 1.),
     )
 
     mkpath("out")
