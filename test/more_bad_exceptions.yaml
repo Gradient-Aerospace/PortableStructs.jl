@@ -1,0 +1,7 @@
+include:
+  source: roses.yaml
+  except:
+    - path: rosaceae.3malus
+      value:
+        - domestica
+        - fusca

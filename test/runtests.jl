@@ -195,6 +195,19 @@ end
 
 end
 
+@testset "exceptions" begin
+
+    x = load_from_yaml("exceptions.yaml")
+    @test x["rosaceae"]["pyrus"] == ["communis"]
+    @test x["rosaceae"]["malus"] == ["domestica", "fusca"]
+    @test x["rosaceae"]["sorbus"] == ["aucuparia"]
+    @test x["rosaceae"]["aruncus"] == ["dioicus"]
+
+    @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("bad_exceptions.yaml")
+    @test_throws "\"3malus\" is not a valid identifier." load_from_yaml("more_bad_exceptions.yaml")
+
+end
+
 @testset "custom to_dict and from_dict" begin
 
     file = "out/my_custom_type.yaml"

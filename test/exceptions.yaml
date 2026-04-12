@@ -1,0 +1,10 @@
+include:
+  source: roses.yaml
+  except:
+    - path: rosaceae.malus
+      value:
+        - domestica
+        - fusca
+    - path: rosaceae.aruncus # This isn't in roses.yaml, but we're allowed to add stuff.
+      value:
+        - dioicus

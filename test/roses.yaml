@@ -1,0 +1,8 @@
+rosaceae:
+  type: Family
+  pyrus:
+    - communis
+  malus:
+    - domestica
+  sorbus:
+    - aucuparia
