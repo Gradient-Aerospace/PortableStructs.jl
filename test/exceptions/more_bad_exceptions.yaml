@@ -5,6 +5,6 @@ include:
       value:
         - domestica
         - fusca
-    - path: rosaceae.aruncus # This isn't in roses.yaml, but we're allowed to add stuff.
+    - path: rosaceae.arctostaphylos # arctostaphylos isn't in rosaceae.
       value:
-        - dioicus
+        - uva-ursi

@@ -197,14 +197,13 @@ end
 
 @testset "exceptions" begin
 
-    x = load_from_yaml("exceptions.yaml")
+    x = load_from_yaml("exceptions/exceptions.yaml")
     @test x["rosaceae"]["pyrus"] == ["communis"]
     @test x["rosaceae"]["malus"] == ["domestica", "fusca"]
     @test x["rosaceae"]["sorbus"] == ["aucuparia"]
-    @test x["rosaceae"]["aruncus"] == ["dioicus"]
 
-    @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("bad_exceptions.yaml")
-    @test_throws "\"3malus\" is not a valid identifier." load_from_yaml("more_bad_exceptions.yaml")
+    @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
+    @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")
 
 end
 

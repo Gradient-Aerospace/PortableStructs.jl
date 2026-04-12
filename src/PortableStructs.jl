@@ -290,14 +290,12 @@ function make_exception!(d, path, value)
     # If there were no matches, assume this is a new valud to add.
     if isnothing(m)
 
-        # This *is* allowed to make new fields in the dictionary, so we don't test that
-        # it's already a key.
-        @assert Base.isidentifier(path) "\"$path\" is not a valid identifier."
+        @assert haskey(d, path) "\"$path\" is not a valid key. Available keys: $(keys(d))."
         d[path] = value
 
     else
 
-        @assert haskey(d, m.captures[1]) "While overwriting the value in \"$path\", the \"$(m.captures[1])\" key was not found. Available fields: $(keys(d))."
+        @assert haskey(d, m.captures[1]) "While overwriting the value in \"$path\", the \"$(m.captures[1])\" key was not found. Available keys: $(keys(d))."
         make_exception!(d[m.captures[1]], m.captures[2], value)
 
     end
