@@ -276,9 +276,10 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
     elseif isconcretetype(T)
         # println("This type is concrete, so we can construct it directly.")
         return from_named_tuple(T, get_children(T, dict; type_key, base_module))
+    elseif dict isa T
+        return dict
     end
-    return dict
-    # error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
+    error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
 end
 
 function make_exception!(d, path, value)
@@ -354,26 +355,7 @@ function expand_include_files(d, dir; include_key = "include")
     # Now if there's an "include" in there, load that file, and expand it the same way we
     # were expanded.
     if haskey(d, include_key)
-
         d = fetch_included_file(d, dir, d[include_key]; include_key)
-
-        # # See if we should use the given file name (absolute path) or join it with our
-        # # current path. Also, remove that key.
-        # filename = if isabspath(d[include_key])
-        #     d[include_key]
-        # else
-        #     joinpath(dir, d[include_key])
-        # end
-        # delete!(d, include_key)
-
-        # # Now do exactly the same thing that was done to get here in the first place.
-        # subdict = YAML.load_file(filename; dicttype = OrderedDict{String, Any})
-        # subdict = expand_include_files(subdict, dirname(filename); include_key)
-
-        # # Let any other keys in the dictionary overwrite what we loaded (the parent is
-        # # allowed to overwrite the child).
-        # d = merge(subdict, d)
-
     end
 
     # Return the possibly updated, possibly completely replaced dictionary.
