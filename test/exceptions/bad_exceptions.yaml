@@ -1,0 +1,7 @@
+include:
+  source: roses.yaml
+  except:
+    - path: rosac7eae.malus
+      value:
+        - domestica
+        - fusca

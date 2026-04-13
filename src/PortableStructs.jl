@@ -276,8 +276,70 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
     elseif isconcretetype(T)
         # println("This type is concrete, so we can construct it directly.")
         return from_named_tuple(T, get_children(T, dict; type_key, base_module))
+    elseif dict isa T
+        return dict
     end
     error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
+end
+
+function make_exception!(d, path, value)
+
+    # Try to match from the beginning of a string to the first dot, capturing everything
+    # before and everything after the dot.
+    m = match(r"^([^.]+)\.(.+)$", path)
+
+    # If there were no matches, assume this is a new valud to add.
+    if isnothing(m)
+
+        @assert haskey(d, path) "\"$path\" is not a valid key. Available keys: $(keys(d))."
+        d[path] = value
+
+    else
+
+        @assert haskey(d, m.captures[1]) "While overwriting the value in \"$path\", the \"$(m.captures[1])\" key was not found. Available keys: $(keys(d))."
+        make_exception!(d[m.captures[1]], m.captures[2], value)
+
+    end
+
+end
+
+function fetch_included_file(d, dir, include::AbstractDict; include_key)
+
+    @assert haskey(include, "source") "No source was provided for an include entry."
+
+    # See if we should use the given file name (absolute path) or join it with our
+    # current path. Also, remove that key.
+    filename = if isabspath(include["source"])
+        include["source"]
+    else
+        joinpath(dir, include["source"])
+    end
+    delete!(d, include_key)
+
+    # Now do exactly the same thing that was done to get here in the first place.
+    subdict = YAML.load_file(filename; dicttype = OrderedDict{String, Any})
+    subdict = expand_include_files(subdict, dirname(filename); include_key)
+
+    # Let any other keys in the dictionary overwrite what we loaded (the parent is
+    # allowed to overwrite the child).
+    d = merge(subdict, d)
+
+    # Now process the "except"s.
+    if haskey(include, "except")
+        for exception in include["except"]
+            make_exception!(d, exception["path"], exception["value"])
+        end
+    end
+
+    return d
+
+end
+
+function fetch_included_file(d, dir, include::AbstractString; include_key)
+    include = Dict(
+        "source" => include,
+    )
+    return fetch_included_file(d, dir, include; include_key)
 end
 
 # Replace "include" with a dictionary loaded from the given file name.
@@ -292,25 +354,8 @@ function expand_include_files(d, dir; include_key = "include")
 
     # Now if there's an "include" in there, load that file, and expand it the same way we
     # were expanded.
-    if haskey(d, include_key) && d[include_key] isa AbstractString
-
-        # See if we should use the given file name (absolute path) or join it with our
-        # current path. Also, remove that key.
-        filename = if isabspath(d[include_key])
-            d[include_key]
-        else
-            joinpath(dir, d[include_key])
-        end
-        delete!(d, include_key)
-
-        # Now do exactly the same thing that was done to get here in the first place.
-        subdict = YAML.load_file(filename; dicttype = OrderedDict{String, Any})
-        subdict = expand_include_files(subdict, dirname(filename); include_key)
-
-        # Let any other keys in the dictionary overwrite what we loaded (the parent is
-        # allowed to overwrite the child).
-        d = merge(subdict, d)
-
+    if haskey(d, include_key)
+        d = fetch_included_file(d, dir, d[include_key]; include_key)
     end
 
     # Return the possibly updated, possibly completely replaced dictionary.

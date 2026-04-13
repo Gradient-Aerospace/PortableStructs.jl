@@ -195,6 +195,18 @@ end
 
 end
 
+@testset "exceptions" begin
+
+    x = load_from_yaml("exceptions/exceptions.yaml")
+    @test x["rosaceae"]["pyrus"] == ["communis"]
+    @test x["rosaceae"]["malus"] == ["domestica", "fusca"]
+    @test x["rosaceae"]["sorbus"] == ["aucuparia"]
+
+    @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
+    @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")
+
+end
+
 @testset "custom to_dict and from_dict" begin
 
     file = "out/my_custom_type.yaml"
