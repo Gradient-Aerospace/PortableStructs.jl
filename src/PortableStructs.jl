@@ -201,6 +201,59 @@ function from_dict(::Type{NamedTuple}, v::AbstractDict{<:AbstractString, <:Any};
     )
 end
 
+# If we are trying to load something as a function, see if it has a proper name we can use.
+function from_dict(::Type{<:Function}, v::String; base_module, kwargs...)
+
+    # Anonymous functions can't be loaded. They'll look like var"#1#2"(). Give a helpful
+    # error.
+    if startswith(v, "var\"#")
+        error("Could not load an anonymous function identified as $v.")
+    end
+
+    # Move through modules like A.B.C.
+    module_name = base_module
+    module_path = split(v, ".")
+    for k in 1:length(module_path)-1
+        try
+            module_name = getfield(module_name, Symbol(module_path[k]))
+        catch err
+            error("Could not find the $(module_path[k]) module in the $module_name module.")
+        end
+    end
+
+    # Now that we have the module, pull the function symbols.
+    function_symbol = Symbol(last(module_path))
+    f = try
+        getfield(module_name, function_symbol)
+    catch err
+        error("The $function_symbol type/function could not be found in $module_name.")
+    end
+
+    # If that's not a function, then we aren't delivering what was requested. Bail out.
+    if !isa(f, Function)
+        error("Could not load the given function: $v")
+    end
+
+    return f
+
+end
+
+# If the eltype of the dict is known, we can use that.
+function from_dict(t::Type{<:AbstractDict{<:AbstractString, T}}, v::AbstractDict; kwargs...) where {T}
+    return OrderedDict( # We can use any type that's an AbstractDict.
+        key => from_dict(T, el; kwargs...)
+        for (key, el) in pairs(v)
+    )
+end
+
+# If the eltype of the dict isn't known...
+function from_dict(t::Type{<:AbstractDict}, v::AbstractDict; kwargs...)
+    return OrderedDict( # We can use any type that's an AbstractDict.
+        key => from_dict(Any, el; kwargs...)
+        for (key, el) in pairs(v)
+    )
+end
+
 """
     from_named_tuple(type::Type, named_tuple)
 
@@ -213,7 +266,7 @@ arguments.
 from_named_tuple(::Type{T}, named_tuple::NamedTuple) where {T} = T(; named_tuple...)
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Rational} = T(nt.num, nt.den)
 from_named_tuple(::Type{T}, nt::NamedTuple) where {T <: Complex} = T(nt.re, nt.im)
-from_named_tuple(f::Function, nt::NamedTuple) = f(; nt...)
+from_named_tuple(f::Function, nt::NamedTuple) = f(; nt...) # This _runs_ a function.
 
 # For types, expect to from_dict all of the children using the types of the type's fields.
 function get_children(type::Type, dict; type_key, base_module)
@@ -232,20 +285,10 @@ function get_children(::Function, dict; type_key, base_module)
     )
 end
 
-# Here's the big one. For constructing general composite types, there are really two
-# different cases to handle. If the type we seek is concrete, then we can try to construct
-# it with keyword arguments. We'll use each field's type to construct each value of the
-# keyword arguments.
-#
-# But if the type we're constructing is abstract, we need to see which concrete thing to
-# construct. We'll look for a "type" field that tells us. However, that will be a string.
-# How do we get the corresponding type? We could just evaluate the string as an expression,
-# but we're prefer to avoid direct evaluation of expressions here. Instead, we'll see if
-# we can find any subtype of the sought type whose string representation matches what's
-# coming from the dictionary. This involves using subtypes, which means we depend on
-# InteractiveUtils. That's not totally inappropriate for what we're doing, but it feels a
-# little funny to rely on that in an otherwise non-interactive use case.
-#
+# This is for constructing general composite types. If there's a type key, we'll use that
+# and attempt to instantiate that type via keyword arguments. If there's no type key, but
+# the input type is concrete (so, we know the types of the fields), we will try to construct
+# that via keyword arguments, using the appropriate type for each field.
 function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {T}
     # println("Constructing a $T...")
     if haskey(dict, type_key)
@@ -277,6 +320,10 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
         # println("This type is concrete, so we can construct it directly.")
         return from_named_tuple(T, get_children(T, dict; type_key, base_module))
     elseif dict isa T
+        # Note: This isn't a great fallback. We should keep calling from_dict on the
+        # children, but without a concrete type, we don't know how to instantiate it. So,
+        # this does nothing recursive. If the dict is already what was requested, then
+        # that's what you'll get.
         return dict
     end
     error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
@@ -405,18 +452,29 @@ to_dict(v::AbstractString; kwargs...) = v
 to_dict(v::AbstractChar; kwargs...) = v
 to_dict(v::Symbol; kwargs...) = string(v)
 to_dict(v::Enum; kwargs...) = string(v)
+to_dict(v::Function; kwargs...) = repr(v)
 to_dict(v::AbstractVector; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::Tuple; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::NamedTuple; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 to_dict(v::AbstractDict; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 function to_dict(v; type_key)
+
+    # Try to figure out the type. This will search for Module.Submodule.Type. Any type
+    # parameters will be dropped.
     m = match(r"^(\w+\.)*(\w+)", string(typeof(v)))
+    if isnothing(m)
+        error("The string, $v, could not be interpreted as a type.")
+    end
     type_string = m.match
+
+    # Now we can use that type to get the fields and make a dictionary from it.
     dict = OrderedDict{String, Any}(type_key => type_string)
     for fn in fieldnames(typeof(v))
         dict[string(fn)] = to_dict(getfield(v, fn); type_key)
     end
+
     return dict
+
 end
 
 """

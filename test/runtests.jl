@@ -221,3 +221,32 @@ end
     @test c.contents == c2.contents
 
 end
+
+module TestA
+    module TestB
+        function foo(x)
+            return 2x
+        end
+    end
+end
+
+@kwdef struct FunctionWrapper
+    f::Function
+end
+
+@testset "function" begin
+
+    # Test a function embedded in a bunch of modules.
+    file = "out/my_function.yaml"
+    fw = FunctionWrapper(; f = TestA.TestB.foo)
+    write_to_yaml(file, fw)
+    fw2 = load_from_yaml(file)
+    @test fw2.f == fw.f
+
+    # Test that an anonymous function is recognized and errors out.
+    file = "out/my_anonymous_function.yaml"
+    fw = FunctionWrapper(; f = (x) -> 3x)
+    write_to_yaml(file, fw)
+    @test_throws "Could not load an anonymous function" load_from_yaml(file)
+
+end
