@@ -2,6 +2,10 @@
 The PortableStructs module provides an easy way to write out structs as YAML/JSON and also
 to load YAML/JSON and populate the appropriate struct.
 
+PortableStructs is intended for trusted configuration and data files. Loading a typed file
+resolves type/function names from Julia modules and can call constructors or functions, so
+it should not be used as a safe deserializer for untrusted input.
+
 It is easy to write (most) structs-of-structs out to a YAML file:
 
 ```
@@ -479,6 +483,18 @@ Keyword arguments:
 """
 function write_to_yaml end
 
+function extension_not_loaded_error(package_name, function_name)
+    error("`$function_name` requires `$package_name`. Load it with `import $package_name` before calling `$function_name`.")
+end
+
+function load_from_yaml(args...; kwargs...)
+    return extension_not_loaded_error("YAML", "load_from_yaml")
+end
+
+function write_to_yaml(args...; kwargs...)
+    return extension_not_loaded_error("YAML", "write_to_yaml")
+end
+
 """
     load_from_json(filename [, t::Type]; kwargs...)
 
@@ -513,6 +529,14 @@ Keyword arguments:
 """
 function write_to_json end
 
+function load_from_json(args...; kwargs...)
+    return extension_not_loaded_error("JSON", "load_from_json")
+end
+
+function write_to_json(args...; kwargs...)
+    return extension_not_loaded_error("JSON", "write_to_json")
+end
+
 # These generics are implemented by format extensions. They keep parser-specific behavior
 # at the edge: the core package only knows how to turn dictionaries into structs and structs
 # into dictionaries.
@@ -520,6 +544,22 @@ function load_yaml_dict end
 function write_yaml_dict end
 function load_json_dict end
 function write_json_dict end
+
+function load_yaml_dict(args...; kwargs...)
+    return extension_not_loaded_error("YAML", "load_yaml_dict")
+end
+
+function write_yaml_dict(args...; kwargs...)
+    return extension_not_loaded_error("YAML", "write_yaml_dict")
+end
+
+function load_json_dict(args...; kwargs...)
+    return extension_not_loaded_error("JSON", "load_json_dict")
+end
+
+function write_json_dict(args...; kwargs...)
+    return extension_not_loaded_error("JSON", "write_json_dict")
+end
 
 ###########
 # to_dict #
