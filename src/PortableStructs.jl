@@ -57,7 +57,6 @@ module PortableStructs
 
 export load_from_yaml, write_to_yaml, load_from_json, write_to_json
 
-using StaticArrays: SVector
 using OrderedCollections: OrderedDict
 
 # All of these from_dict methods are specifically meant for building types from
@@ -180,32 +179,6 @@ function from_dict(::Type{T}, v::Vector; kwargs...) where {T <: Tuple}
     return Tuple(from_dict(ft, el; kwargs...) for (ft, el) in zip(fieldtypes(T), v))
 end
 
-# SVectors are like vectors; from_dict each element individually inside an SVector.
-function from_dict(::Type{SVector{N, ET}}, v::Vector; kwargs...) where {N, ET}
-    return SVector{N, ET}(from_dict(ET, el; kwargs...) for el in v)
-end
-function from_dict(t::Type{<:SVector}, v::Vector; kwargs...) # Length is unknown
-    els = [from_dict(eltype(t), el; kwargs...) for el in v]
-    return SVector{length(els), eltype(t)}(els)
-end
-
-# TODO: Move this to an extension.
-# Xoshiro has no keyword constructor, so we make a from_dict method that constructs a
-# Xoshiro directly. Note that this pattern only assumes that the keys are in the right order
-# (and they should be since we use OrderedDicts), that the fields can be constructed
-# using precisely the types given in fieldtypes, and that the overall type (Xoshiro) can be
-# constructed from its individual fields. That makes this a pattern we could probably use
-# with a lot of different types. Maybe we could even see if methodexists for the keyword
-# argument constructor and, if it doesn't, see if method exists for the below.
-using Random: Xoshiro
-function from_dict(::Type{Xoshiro}, v::AbstractDict{<:AbstractString, <:Any}; kwargs...)
-    return Xoshiro(
-        (
-            from_dict(ft, v[string(fn)]; kwargs...)
-            for (ft, fn) in zip(fieldtypes(Xoshiro), fieldnames(Xoshiro))
-        )...,
-    )
-end
 function from_dict(type::Type{<:Unsigned}, v::String; kwargs...)
     return parse(type, v)
 end
