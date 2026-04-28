@@ -2,6 +2,8 @@
 
 This package provides an easy way to write out structs as YAML/JSON and also to load YAML/JSON and populate the appropriate struct.
 
+PortableStructs is intended for trusted configuration and data files. Loading a typed file resolves type/function names from Julia modules and can call constructors or functions, so it should not be used as a safe deserializer for untrusted input.
+
 It is easy to write (most) structs-of-structs out to a YAML file:
 
 ```
@@ -66,6 +68,8 @@ status: "DoingWell"
 We can load that back in like so:
 
 ```
+import PortableStructs
+import YAML
 y = PortableStructs.load_from_yaml("my_struct.yaml")
 ```
 
@@ -76,6 +80,22 @@ MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
 ```
 
 The `type` can be a type or a function to call with keyword arguments.
+
+The same dictionary representation can be written to JSON. The JSON methods are available once `JSON` is loaded:
+
+```
+import PortableStructs
+import JSON
+
+PortableStructs.write_to_json("my_struct.json", x)
+y = PortableStructs.load_from_json("my_struct.json")
+```
+
+If the desired output type is known, pass it as the second argument:
+
+```
+y = PortableStructs.load_from_json("my_struct.json", MyType)
+```
 
 A YAML file can be "included" at any level. This allows the user to break up a large YAML file into smaller ones. By default, the key `include` will be used to indicate what file to include. The `include_key` keyword argument to `load_from_yaml` can specify a different key to use (e.g., `_include`). When including files, the file name is assumed to be relative to the file that has the "include" in it (or an absolute path).
 
@@ -88,6 +108,23 @@ This package is meant to be simple, and that simplicity comes from several const
 There is overlap with the functionality in StructTypes. This package is not as flexible as that one, but it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.
 
 YAML and JSON support are provided by package extensions. This means `PortableStructs` itself does not depend directly on either parser. Load `YAML` before calling `load_from_yaml` or `write_to_yaml`, and load `JSON` before calling `load_from_json` or `write_to_json`.
+
+## Extension points
+
+PortableStructs has two main customization hooks.
+
+`PortableStructs.to_dict(v; type_key, kwargs...)` converts a Julia value into the plain Julia data that a file-format extension can write: scalars, vectors, and dictionaries with string keys. Extend this when a type should have a more compact or semantic representation than "all fields plus a type tag". For example, a data-backed object might write only a filename.
+
+`PortableStructs.from_dict(::Type{T}, value; type_key, base_module, kwargs...)` converts parsed data back into `T`. Extend this for types you own when the generic keyword-constructor path is not right. For types owned by other packages, prefer a small adapter package or package extension rather than adding broad methods in reusable libraries.
+
+The parser-specific dictionary functions live at the file-format boundary:
+
+* `PortableStructs.load_yaml_dict(filename; include_key = "include")`
+* `PortableStructs.write_yaml_dict(filename, dict)`
+* `PortableStructs.load_json_dict(filename; include_key = "include")`
+* `PortableStructs.write_json_dict(filename, dict; indent = 4)`
+
+These functions are implemented by the YAML and JSON extensions. They are useful if you want to work directly at the dictionary layer, or if you are writing another format extension and want to mirror the same pattern: parse a file into dictionaries, let PortableStructs expand includes and construct values, then write dictionaries back out.
 
 Design notes:
 
