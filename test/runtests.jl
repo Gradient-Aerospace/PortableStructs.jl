@@ -4,6 +4,7 @@ using PortableStructs
 using Random: Xoshiro
 using OrderedCollections: OrderedDict
 using YAML: load_file
+using JSON
 
 @enum Fruit guava cantaloupe
 
@@ -121,6 +122,44 @@ mkpath("out")
     # Load in the YAML and see if everything's as it was.
     y = load_from_yaml("out/my_concrete_type_with_custom_type_key.yaml"; type_key = "_type")
     @test x == y
+
+end
+
+@testset "JSON" begin
+
+    x = MyConcreteType(
+        1., 2, "3", [4., 5.], 6//1, 7. + 8im, nothing, missing, 'M', guava,
+        SA[9., 10., 11.], (; x = 1, y = 2.), :pika, Xoshiro(123), -0x1,
+    )
+    file = "out/my_concrete_type.json"
+    write_to_json(file, x)
+
+    json = JSON.parsefile(file)
+    @test json["type"] == "MyConcreteType"
+
+    y = load_from_json(file)
+    @test x == y
+
+    manual_file = "out/manual.json"
+    manual = OrderedDict(
+        "a" => "1//2",
+        "b" => "3.0 + 4.0im",
+        "c" => "1",
+        "d" => OrderedDict(
+            "type" => "a_function_to_call",
+            "x" => 1,
+            "y" => "cats",
+        ),
+    )
+    PortableStructs.write_json_dict(manual_file, manual)
+
+    z = load_from_json(manual_file, MyManualType)
+    @test z.a == 1//2
+    @test z.b == 3.0 + 4im
+    @test z.c isa MyParseableType
+    @test z.c.int == 1
+    @test z.d[1] == 1
+    @test z.d[2] == "cats"
 
 end
 
