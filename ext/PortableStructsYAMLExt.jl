@@ -21,11 +21,6 @@ function PortableStructs.load_yaml_dict(filename::AbstractString; include_key = 
     )
 end
 
-function PortableStructs.write_yaml_dict(filename::AbstractString, dict)
-    YAML.write_file(filename, dict)
-    return nothing
-end
-
 function PortableStructs.load_from_yaml(
     filename::AbstractString,
     t::Type;
@@ -39,6 +34,11 @@ end
 
 function PortableStructs.load_from_yaml(filename::AbstractString; kwargs...)
     return PortableStructs.load_from_yaml(filename, Any; kwargs...)
+end
+
+function PortableStructs.write_yaml_dict(filename::AbstractString, dict)
+    YAML.write_file(filename, dict)
+    return nothing
 end
 
 function PortableStructs.write_to_yaml(filename::AbstractString, v; type_key = "type")

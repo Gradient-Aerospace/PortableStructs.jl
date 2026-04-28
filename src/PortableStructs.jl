@@ -76,6 +76,10 @@ using OrderedCollections: OrderedDict
 # * Dict    -> Convert each element to the eltype of the LHS and construct the type, named tuple, or dict.
 #
 
+#########################
+# Specialized from_dict #
+#########################
+
 """
     from_dict(t::Type, v; kwargs...)
 
@@ -258,6 +262,10 @@ function from_dict(t::Type{<:AbstractDict}, v::AbstractDict; kwargs...)
     )
 end
 
+#################################
+# Construction of General Types #
+#################################
+
 """
     from_named_tuple(type::Type, named_tuple)
 
@@ -293,7 +301,6 @@ function resolve_name(name::AbstractString; base_module)
             error("Could not find the $(module_path[k]) module in the $module_name module.")
         end
     end
-
     binding_symbol = Symbol(last(module_path))
     return try
         getfield(module_name, binding_symbol)
@@ -375,6 +382,10 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {
     end
     error("Could not construct a $T from the given dictionary:\n\n$(dict)\n\n Adding a \"$type_key\" key would help resolve which type to construct.")
 end
+
+############
+# Includes #
+############
 
 function make_exception!(d, path, value)
 
@@ -458,6 +469,10 @@ function expand_include_files(d, dir, load_dict; include_key = "include")
 
 end
 
+##############
+# Extensions #
+##############
+
 """
     load_from_yaml(filename [, t::Type]; kwargs...)
 
@@ -532,6 +547,10 @@ function load_yaml_dict end
 function write_yaml_dict end
 function load_json_dict end
 function write_json_dict end
+
+###########
+# to_dict #
+###########
 
 """
     to_dict(v; kwargs...)

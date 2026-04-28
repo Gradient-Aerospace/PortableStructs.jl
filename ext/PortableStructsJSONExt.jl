@@ -21,14 +21,6 @@ function PortableStructs.load_json_dict(filename::AbstractString; include_key = 
     )
 end
 
-function PortableStructs.write_json_dict(filename::AbstractString, dict; indent = 4)
-    open(filename, "w") do io
-        JSON.print(io, dict, indent)
-        println(io)
-    end
-    return nothing
-end
-
 function PortableStructs.load_from_json(
     filename::AbstractString,
     t::Type;
@@ -42,6 +34,14 @@ end
 
 function PortableStructs.load_from_json(filename::AbstractString; kwargs...)
     return PortableStructs.load_from_json(filename, Any; kwargs...)
+end
+
+function PortableStructs.write_json_dict(filename::AbstractString, dict; indent = 4)
+    open(filename, "w") do io
+        JSON.print(io, dict, indent)
+        println(io)
+    end
+    return nothing
 end
 
 function PortableStructs.write_to_json(filename::AbstractString, v; type_key = "type", indent = 4)
