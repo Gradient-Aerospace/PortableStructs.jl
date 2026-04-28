@@ -6,12 +6,15 @@ It is easy to write (most) structs-of-structs out to a YAML file:
 
 ```
 import PortableStructs
+import YAML # Activates PortableStructs' YAML extension.
 PortableStructs.write_to_yaml("file.yaml", my_struct)
 ```
 
 It is similarly easy to load from YAML:
 
 ```
+import PortableStructs
+import YAML
 my_struct = PortableStructs.load_from_yaml("file.yaml")
 ```
 
@@ -20,6 +23,8 @@ The loaded structure will in general have the same native Julia types as the ori
 Where the type you wish to load as is known, that can be provided:
 
 ```
+import PortableStructs
+import YAML
 my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
 ```
 
@@ -41,6 +46,7 @@ end
 x = MyType("My Name", Position(1., 2., 3.), DoingWell)
 
 import PortableStructs
+import YAML
 PortableStructs.write_to_yaml("my_struct.yaml", x)
 ```
 
@@ -81,7 +87,8 @@ This package is meant to be simple, and that simplicity comes from several const
 
 There is overlap with the functionality in StructTypes. This package is not as flexible as that one, but it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.
 
+YAML and JSON support are provided by package extensions. This means `PortableStructs` itself does not depend directly on either parser. Load `YAML` before calling `load_from_yaml` or `write_to_yaml`, and load `JSON` before calling `load_from_json` or `write_to_json`.
+
 Design notes:
 
-* We could potentially put `load_from_yaml` in a YAML extension, `load_from_json` in a JSON extension, etc.
 * The key reason this package exists, instead of just using StructTypes, is that this handles abstract types where the potential subtypes of the abstract type aren't known (one can't write a `StructTypes.subtypes` function to resolve which abstract type should be constructed).
