@@ -1,5 +1,4 @@
 rosaceae:
-  type: Family
   pyrus:
     - communis
   malus:
