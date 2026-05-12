@@ -106,10 +106,21 @@ function from_dict end
 # registry of user-provided constructors, or stricter conversion rules can each live in the
 # appropriate stage without turning `from_dict` into one large conditional.
 
+# General from_dict behavior
+
 # If the value is already the sought-after type, just use it.
 function from_dict(t::Type{T}, v::V; kwargs...) where {T, V <: T}
     return v
 end
+
+# If the type is actually a function, load all children as keyword arguments and then run
+# the function.
+function from_dict(f::Function, v; kwargs...)
+    children = constructor_arguments(f, v; kwargs...)
+    return f(; children...)
+end
+
+# Numbers
 
 # If they're both numbers but not the same type, convert them explicitly.
 function from_dict(::Type{T}, v::AbstractFloat; kwargs...) where {T <: AbstractFloat}
@@ -141,6 +152,12 @@ function from_dict(::Type{Complex}, v::AbstractDict; kwargs...)
     return Complex(v["re"], v["im"])
 end
 
+function from_dict(type::Type{<:Unsigned}, v::String; kwargs...)
+    return parse(type, v)
+end
+
+# String-Like
+
 # Chars can come from strings.
 function from_dict(t::Type{<:AbstractChar}, v::String; kwargs...)
     return only(v)
@@ -161,6 +178,8 @@ function from_dict(t::Type{Symbol}, v::String; kwargs...)
     return Symbol(v)
 end
 
+# Parse-able
+
 # If we want some other type, and we have a string, try to parse as that type.
 function from_dict(t::Type{T}, v::String; kwargs...) where {T}
     if String <: T
@@ -170,14 +189,29 @@ function from_dict(t::Type{T}, v::String; kwargs...) where {T}
     end
 end
 
-# If we need a dict with string keys, well, that's what the RHS is already, right? But we
-# still need to dive in and attempt to from_dict each element.
-function from_dict(::Type{T}, v::AbstractDict; type_key, kwargs...) where {T <: AbstractDict{String, VT}} where {VT}
-    return T(
-        key => from_dict(VT, el; type_key, kwargs...)
-        for (key, el) in pairs(v) if key != type_key
-    )
+# Function
+
+# If we are trying to load something as a function, see if it has a proper name we can use.
+function from_dict(::Type{<:Function}, v::String; base_module, kwargs...)
+
+    # Anonymous functions can't be loaded. They'll look like var"#1#2"(). Give a helpful
+    # error.
+    if startswith(v, "var\"#")
+        error("Could not load an anonymous function identified as $v.")
+    end
+
+    f = resolve_name(v; base_module)
+
+    # If that's not a function, then we aren't delivering what was requested. Bail out.
+    if !isa(f, Function)
+        error("Could not load the given function: $v")
+    end
+
+    return f
+
 end
+
+# Vectors and tuples
 
 # # If we're loading up a vector, from_dict each element individually.
 function from_dict(t::Type{<:Vector}, v::Vector; kwargs...)
@@ -204,9 +238,7 @@ function from_dict(::Type{Tuple}, v::Vector; kwargs...)
     return Tuple(from_dict(Any, el; kwargs...) for el in v)
 end
 
-function from_dict(type::Type{<:Unsigned}, v::String; kwargs...)
-    return parse(type, v)
-end
+# Named Tuples
 
 # If we seek a fully characterized named tuple but have a dict, let the keys be the names.
 function from_dict(::Type{NamedTuple{F, T}}, v::AbstractDict{<:AbstractString, <:Any}; kwargs...) where {F, T}
@@ -224,47 +256,53 @@ function from_dict(::Type{NamedTuple}, v::AbstractDict{<:AbstractString, <:Any};
     )
 end
 
-# If we are trying to load something as a function, see if it has a proper name we can use.
-function from_dict(::Type{<:Function}, v::String; base_module, kwargs...)
 
-    # Anonymous functions can't be loaded. They'll look like var"#1#2"(). Give a helpful
-    # error.
-    if startswith(v, "var\"#")
-        error("Could not load an anonymous function identified as $v.")
-    end
+# Dicts
 
-    f = resolve_name(v; base_module)
-
-    # If that's not a function, then we aren't delivering what was requested. Bail out.
-    if !isa(f, Function)
-        error("Could not load the given function: $v")
-    end
-
-    return f
-
+# If we need a dict with string keys, well, that's what the RHS is already, right? But we
+# still need to dive in and attempt to from_dict each element.
+function from_dict(::Type{T}, v::AbstractDict; type_key, kwargs...) where {T <: AbstractDict{String, VT}} where {VT}
+    return T(
+        key => from_dict(VT, el; type_key, kwargs...)
+        for (key, el) in pairs(v) if key != type_key
+    )
 end
 
 # If the eltype of the dict is known, we can use that.
-function from_dict(t::Type{<:AbstractDict{S, T}}, v::AbstractDict; type_key, kwargs...) where {S <:AbstractString, T}
-    return t(
-        S(key) => from_dict(T, el; type_key, kwargs...) # Need to make the key have the right type.
+function from_dict(t::Type{Dict{KT, VT}}, v::AbstractDict; type_key, kwargs...) where {KT <: AbstractString, VT}
+    return Dict{KT, VT}(
+        KT(key) => from_dict(VT, el; type_key, kwargs...) # Need to make the key have the right type.
+        for (key, el) in pairs(v) if key != type_key
+    )
+end
+function from_dict(t::Type{OrderedDict{KT, VT}}, v::AbstractDict; type_key, kwargs...) where {KT <: AbstractString, VT}
+    return OrderedDict{KT, VT}(
+        KT(key) => from_dict(VT, el; type_key, kwargs...) # Need to make the key have the right type.
         for (key, el) in pairs(v) if key != type_key
     )
 end
 
 # If the eltype of the dict isn't known...
-function from_dict(t::Type{<:AbstractDict}, v::AbstractDict; type_key, kwargs...)
-    return t( # Infer the key and value types since those weren't provided.
+function from_dict(t::Type{T}, v::AbstractDict; type_key, kwargs...) where {T <: Union{Dict, OrderedDict}}
+    return T( # Infer the key and value types since those weren't provided.
         key => from_dict(Any, el; type_key, kwargs...)
         for (key, el) in pairs(v) if key != type_key
     )
 end
 
-# If the type is actually a function, load all children as keyword arguments and then run
-# the function.
-function from_dict(f::Function, v; kwargs...)
-    children = constructor_arguments(f, v; kwargs...)
-    return f(; children...)
+# If we're literally asking for the abstraction, then we can return anything satisfying the
+# abstraction, so let's choose OrderedDict.
+function from_dict(t::Type{AbstractDict}, v::AbstractDict; type_key, kwargs...)
+    return OrderedDict(
+        key => from_dict(Any, el; type_key, kwargs...)
+        for (key, el) in pairs(v) if key != type_key
+    )
+end
+function from_dict(t::Type{AbstractDict{S, T}}, v::AbstractDict; type_key, kwargs...) where {S, T}
+    return OrderedDict{S, T}(
+        key => from_dict(Any, el; type_key, kwargs...)
+        for (key, el) in pairs(v) if key != type_key
+    )
 end
 
 #################################
@@ -364,7 +402,8 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         new_dict_without_type_key = typeof(dict)(
             key => value for (key, value) in dict if key != type_key
         )
-        return from_dict(target, new_dict_without_type_key; type_key, base_module)
+        value = from_dict(target, new_dict_without_type_key; type_key, base_module)
+        return finish_decoded_value(T, value)
 
     elseif OrderedDict <: T
 
