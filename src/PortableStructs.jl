@@ -478,22 +478,74 @@ end
 # Includes #
 ############
 
-function make_exception!(d, path, value)
+function first_exception_path_segment(path)
 
     # Try to match from the beginning of a string to the first dot, capturing everything
     # before and everything after the dot.
     m = match(r"^([^.]+)\.(.+)$", path)
 
-    # If there were no matches, assume this is a new valud to add.
     if isnothing(m)
+        return path, nothing
+    else
+        return m.captures[1], m.captures[2]
+    end
 
-        @assert haskey(d, path) "\"$path\" is not a valid key. Available keys: $(keys(d))."
-        d[path] = value
+end
+
+function key_and_index(segment)
+
+    m = match(r"^([^\[\]]+)\[(\d+)\]$", segment)
+    if isnothing(m)
+        @assert !occursin('[', segment) && !occursin(']', segment) "\"$segment\" is not a valid exception path segment."
+        return segment, nothing
+    else
+        return m.captures[1], parse(Int, m.captures[2])
+    end
+
+end
+
+function check_exception_index(v, index, path)
+    @assert index >= 1 "While overwriting the value in \"$path\", a non-positive index was encountered, but indices should be 1-indexed."
+    @assert index <= length(v) "While overwriting the value in \"$path\", index [$index] was not found. Available indices: 1:$(length(v))."
+end
+
+function make_exception!(d::AbstractDict, path, value)
+
+    segment, rest = first_exception_path_segment(path)
+    key, index = key_and_index(segment)
+
+    # If we're at the end of the path...
+    if isnothing(rest)
+
+        # If there were no indices in the path...
+        if isnothing(index)
+
+            # Update the element here. The element *must* exist already; adding a new key is
+            # likely a typo.
+            @assert haskey(d, key) "\"$key\" is not a valid key. Available keys: $(keys(d))."
+            d[key] = value
+
+        else
+
+            # There was an index, so we expect to write to an element of a vector.
+            @assert haskey(d, key) "While overwriting the value in \"$path\", the \"$key\" key was not found. Available keys: $(keys(d))."
+            @assert d[key] isa AbstractVector "While overwriting the value in \"$path\", \"$key\" is not a vector."
+            check_exception_index(d[key], index, path)
+            d[key][index] = value
+
+        end
 
     else
 
-        @assert haskey(d, m.captures[1]) "While overwriting the value in \"$path\", the \"$(m.captures[1])\" key was not found. Available keys: $(keys(d))."
-        make_exception!(d[m.captures[1]], m.captures[2], value)
+        # Otherwise, we're not yet at the end of the path. We'll use recursion to go deeper.
+        @assert haskey(d, key) "While overwriting the value in \"$path\", the \"$key\" key was not found. Available keys: $(keys(d))."
+        target = d[key]
+        if !isnothing(index)
+            @assert target isa AbstractVector "While overwriting the value in \"$path\", \"$key\" is not a vector."
+            check_exception_index(target, index, path)
+            target = target[index]
+        end
+        make_exception!(target, rest, value)
 
     end
 

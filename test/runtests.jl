@@ -481,8 +481,16 @@ end
     y = load_from_yaml("exceptions/relative_exception.yaml")
     @test y["rosaceae"]["sorbus"] == ["aucuparia", "reducta", "pratti"]
 
+    trees = load_from_yaml("exceptions/tree_exception.yaml")
+    @test length(trees["trees"]) == 2
+    @test trees["trees"][1]["common_name"] == "strawberry tree"
+    @test trees["trees"][2]["scientific_name"] == "Arbutus menziesii"
+    @test trees["trees"][2]["common_name"] == "madrona"
+
     @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
     @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")
+    @test_throws "index [3] was not found" load_from_yaml("exceptions/bad_vector_exception.yaml")
+    @test_throws "vector indices are 1-based" load_from_yaml("exceptions/bad_zero_vector_exception.yaml")
 
 end
 
