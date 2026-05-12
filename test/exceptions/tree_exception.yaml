@@ -1,0 +1,5 @@
+include:
+  source: trees.yaml
+  except:
+    - path: trees[2].common_name
+      value: madrona

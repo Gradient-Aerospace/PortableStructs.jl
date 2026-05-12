@@ -1,0 +1,7 @@
+include:
+  source: trees.yaml
+  except:
+    - path: trees[3]
+      value:
+        scientific_name: Arbutus occidentalis
+        common_name: Mexican madrone
