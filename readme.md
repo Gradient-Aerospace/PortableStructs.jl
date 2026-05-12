@@ -101,6 +101,31 @@ A YAML file can be "included" at any level. This allows the user to break up a l
 
 Includes can also provide `except` entries to overwrite values from the included file. Exception paths use dot-separated dictionary keys. They can also target existing vector elements with 1-based indices, matching Julia's indexing. For example, `trees[2].common_name` overwrites the `common_name` key in the second element of the `trees` vector. Vector indices must already exist; exceptions do not append to vectors or create missing vector entries.
 
+For example, `trees.yaml` might provide shared data:
+
+```yaml
+trees:
+  - scientific_name: Arbutus unedo
+    common_name: strawberry tree
+  - scientific_name: Arbutus menziesii
+    common_name: Pacific madrone
+notes: Needs review.
+```
+
+Another file can include it and overwrite selected values:
+
+```yaml
+include:
+  source: trees.yaml
+  except:
+    - path: trees[2].common_name
+      value: madrona
+    - path: notes
+      value: Reviewed.
+```
+
+Loading the second file produces the included data with the second tree's common name changed and the top-level `notes` value replaced. The `trees[2]` path uses Julia-style 1-based indexing.
+
 This package is meant to be simple, and that simplicity comes from several constraints:
 
 * The user's structs will be constructed either from keyword arguments or from positional arguments. For positional arguments, the YAML/JSON file should have a key matching each field name, and the arguments will be provided to the constructor in the order of the field names (*not* in the order in which they're encountered in the YAML/JSON file).
