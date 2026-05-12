@@ -576,9 +576,9 @@ end
 # Replace "include" with a dictionary loaded from the given file name.
 function expand_include_files(d::AbstractDict, dir, load_dict; include_key = "include")
 
-    # First, do this recursively on all elements that are dictionaries.
+    # First, do this recursively on all elements
     for k in keys(d)
-        if k != include_key && d[k] isa AbstractDict
+        if k != include_key
             d[k] = expand_include_files(d[k], dir, load_dict; include_key)
         end
     end

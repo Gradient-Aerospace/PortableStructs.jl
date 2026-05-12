@@ -464,6 +464,10 @@ end
     @test grandma.child.child.name == "Grandchild 1"
     @test grandma.child.child.sibling.name == "Grandchild 2"
 
+    vector_includes = load_from_yaml("vector_include.yaml")
+    @test vector_includes["items"][1]["name"] == "expanded"
+    @test !haskey(vector_includes["items"][1], "include")
+
 end
 
 @testset "exceptions" begin
