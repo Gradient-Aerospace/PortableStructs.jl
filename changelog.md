@@ -1,6 +1,6 @@
 # PortableStructs.jl Change Log
 
-## v0.1.0 (unreleased)
+## v1.0.0
 
 * Added typed structural loading and writing through `from_dict` and `to_dict`.
 * Added YAML and JSON support through package extensions.
