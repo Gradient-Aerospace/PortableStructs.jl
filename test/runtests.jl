@@ -65,6 +65,16 @@ end
     d::Tuple{Int64, String}
 end
 
+abstract type TaggedConfig end
+abstract type OtherTaggedConfig end
+
+# This intentionally does not have a keyword constructor. It exercises the fallback that
+# constructs from positional arguments when dict keys exactly match field names.
+struct PositionalOnly
+    a::Int
+    b::TaggedConfig
+end
+
 function a_function_to_call(; x::Int64, y::String)
     return (x, y)
 end
@@ -74,6 +84,16 @@ end
     child::Union{Person, Nothing} = nothing
     sibling::Union{Person, Nothing} = nothing
 end
+
+# These tiny types exercise tagged dictionary loading without leaning on the larger
+# round-trip fixtures below.
+@kwdef struct TaggedConfigLeaf <: TaggedConfig
+    x::Int
+end
+
+# This intentionally has no constructor. It pins down that PortableStructs only chooses a
+# concrete implementation for `AbstractDict` itself, not for arbitrary abstract subtypes.
+abstract type MyAbstractDict{K, V} <: AbstractDict{K, V} end
 
 # Suppose we wanted a type that didn't write all of its fields to YAML. Consider a type
 # that contains a big data vector loaded from a file. We don't need to save all of that data
@@ -207,6 +227,218 @@ end
     for fn in fieldnames(TypeWithMoreComplexFields)
         @test getfield(y, fn) == getfield(z, fn)
     end
+
+end
+
+@testset "generic tuple and dictionary loading" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+    tagged_leaf = OrderedDict(
+        type_key => "TaggedConfigLeaf",
+        "x" => 2,
+    )
+
+    # A bare `Tuple` annotation has no element types, so children should be decoded as `Any`.
+    # This still needs to recurse into tagged children rather than returning raw dicts.
+    tuple = PortableStructs.from_dict(Tuple, Any[1, tagged_leaf]; type_key, base_module)
+    @test tuple[1] == 1
+    @test tuple[2] isa TaggedConfigLeaf
+    @test tuple[2].x == 2
+
+    # A fully typed tuple should reject the wrong number of elements instead of silently
+    # truncating through `zip(fieldtypes(T), v)`.
+    @test_throws AssertionError PortableStructs.from_dict(
+        Tuple{Int, String},
+        Any[1];
+        type_key,
+        base_module,
+    )
+
+    # Generic NamedTuple loading should use parsed keys as field names, skip the type tag,
+    # and recurse into tagged child values.
+    named_tuple = PortableStructs.from_dict(
+        NamedTuple,
+        OrderedDict(
+            type_key => "ignored",
+            "leaf" => tagged_leaf,
+            "count" => 3,
+        );
+        type_key,
+        base_module,
+    )
+    @test keys(named_tuple) == (:leaf, :count)
+    @test named_tuple.leaf isa TaggedConfigLeaf
+    @test named_tuple.leaf.x == 2
+    @test named_tuple.count == 3
+
+    # Types without keyword constructors can still load when the dict keys exactly match
+    # field names. The input order should not matter; construction uses the type's field order.
+    positional = PortableStructs.from_dict(
+        PositionalOnly,
+        OrderedDict(
+            "b" => tagged_leaf,
+            "a" => "5",
+        );
+        type_key,
+        base_module,
+    )
+    @test positional.a == 5
+    @test positional.b isa TaggedConfigLeaf
+    @test positional.b.x == 2
+
+    # Positional fallback should stay narrow: extra or missing keys mean the dict does not
+    # unambiguously map to the type's fields.
+    @test_throws "Could not construct" PortableStructs.from_dict(
+        PositionalOnly,
+        OrderedDict(
+            "a" => "5",
+            "b" => tagged_leaf,
+            "extra" => true,
+        );
+        type_key,
+        base_module,
+    )
+
+    source_dict = OrderedDict(
+        type_key => "ignored",
+        "a" => "1",
+        "b" => 2,
+    )
+
+    # The exact `AbstractDict` interface can materialize as the package's default concrete
+    # mapping type while preserving recursive decoding and filtering the type tag.
+    abstract_dict = PortableStructs.from_dict(
+        AbstractDict,
+        source_dict;
+        type_key,
+        base_module,
+    )
+    @test abstract_dict isa OrderedDict
+    @test !haskey(abstract_dict, type_key)
+    @test abstract_dict["a"] == "1"
+    @test abstract_dict["b"] == 2
+
+    # A parameterized AbstractDict should still materialize as OrderedDict, but it should
+    # honor the requested key and value types.
+    typed_abstract_dict = PortableStructs.from_dict(
+        AbstractDict{String, Int},
+        source_dict;
+        type_key,
+        base_module,
+    )
+    @test typed_abstract_dict isa OrderedDict{String, Int}
+    @test typed_abstract_dict == OrderedDict{String, Int}("a" => 1, "b" => 2)
+
+    # An unparameterized Dict should be constructed as a Dict, infer key/value types, and
+    # continue recursive decoding for tagged child values.
+    dict = PortableStructs.from_dict(
+        Dict,
+        OrderedDict(
+            type_key => "ignored",
+            "leaf" => tagged_leaf,
+        );
+        type_key,
+        base_module,
+    )
+    @test dict isa Dict
+    @test !haskey(dict, type_key)
+    @test dict["leaf"] isa TaggedConfigLeaf
+    @test dict["leaf"].x == 2
+
+    # A fully parameterized Dict should honor its requested value type rather than simply
+    # copying parser-produced values through.
+    typed_dict = PortableStructs.from_dict(
+        Dict{String, Float64},
+        OrderedDict(
+            type_key => "ignored",
+            "a" => 1.0,
+            "b" => "2.5",
+        );
+        type_key,
+        base_module,
+    )
+    @test typed_dict isa Dict{String, Float64}
+    @test typed_dict == Dict{String, Float64}("a" => 1.0, "b" => 2.5)
+
+    # OrderedDict gets its own concrete construction path so ordered inputs keep their order.
+    ordered_dict = PortableStructs.from_dict(
+        OrderedDict{String, Int},
+        source_dict;
+        type_key,
+        base_module,
+    )
+    @test ordered_dict isa OrderedDict{String, Int}
+    @test collect(keys(ordered_dict)) == ["a", "b"]
+    @test ordered_dict == OrderedDict{String, Int}("a" => 1, "b" => 2)
+
+    # PortableStructs should not guess a concrete type for arbitrary abstract dictionary
+    # subtypes. Users can add a specific `from_dict` method for those.
+    @test_throws "Could not construct" PortableStructs.from_dict(
+        MyAbstractDict{String, Int},
+        OrderedDict("a" => "1");
+        type_key,
+        base_module,
+    )
+
+end
+
+@testset "tagged and dict-backed scalar loading" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+    tagged_leaf = OrderedDict(
+        type_key => "TaggedConfigLeaf",
+        "x" => 4,
+    )
+
+    # Tagged values should resolve to the concrete tag and still satisfy the requested
+    # abstract type.
+    config = PortableStructs.from_dict(TaggedConfig, tagged_leaf; type_key, base_module)
+    @test config isa TaggedConfigLeaf
+    @test config.x == 4
+
+    # The final requested type check should reject a valid tag that resolves to the wrong
+    # branch of the type hierarchy.
+    @test_throws MethodError PortableStructs.from_dict(
+        OtherTaggedConfig,
+        tagged_leaf;
+        type_key,
+        base_module,
+    )
+
+    # Rational values can be represented as field dictionaries, both when the element type is
+    # known and when it should be inferred by Julia's Rational constructor.
+    @test PortableStructs.from_dict(
+        Rational{Int},
+        OrderedDict("num" => 1.0, "den" => 2.0);
+        type_key,
+        base_module,
+    ) === 1//2
+
+    @test PortableStructs.from_dict(
+        Rational,
+        OrderedDict("num" => 3, "den" => 4);
+        type_key,
+        base_module,
+    ) === 3//4
+
+    # Complex values have the same dict-backed path as Rational values, including support for
+    # either explicit or inferred element types.
+    complex_value = PortableStructs.from_dict(
+        Complex{Float32},
+        OrderedDict("re" => 1, "im" => 2);
+        type_key,
+        base_module,
+    )
+    @test complex_value === Complex{Float32}(1, 2)
+
+    @test PortableStructs.from_dict(
+        Complex,
+        OrderedDict("re" => 3, "im" => 4);
+        type_key,
+        base_module,
+    ) === 3 + 4im
 
 end
 
