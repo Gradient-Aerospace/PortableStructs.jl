@@ -5,3 +5,8 @@ include:
       value:
         - domestica
         - fusca
+    - path: rosaceae.sorbus
+      value:
+        include: sorbus_list.yaml
+    - path: rosaceae.notes
+      value: "There are a lot more species to add here."

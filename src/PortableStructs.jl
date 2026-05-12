@@ -499,6 +499,12 @@ function make_exception!(d, path, value)
 
 end
 
+# d is a dictionary, because it had an "include" in it. When we load the included thing and
+# have finished searching for includes recursively, the result might be:
+#
+# * a dictionary, in which case we want to merge the loaded values with d and return that
+# * a value, in which case we want to throw away d and return the value
+#
 function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_key)
 
     @assert haskey(include, "source") "No source was provided for an include entry."
@@ -510,25 +516,53 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
     else
         joinpath(dir, include["source"])
     end
-    delete!(d, include_key)
 
     # Now do exactly the same thing that was done to get here in the first place, using
     # the parser supplied by the active format extension.
     subdict = load_dict(filename)
-    subdict = expand_include_files(subdict, dirname(filename), load_dict; include_key)
+    payload = expand_include_files(subdict, dirname(filename), load_dict; include_key)
 
-    # Let any other keys in the dictionary overwrite what we loaded (the parent is
-    # allowed to overwrite the child).
-    d = merge(subdict, d)
+    # We allow structures like this:
+    #
+    #   my_value:
+    #     include: a_basis_file.yaml
+    #     a: "dogs"
+    #     b: "cats"
+    #
+    # This loads `a_basis_file.yaml`, then it overwrites the `a` key and `b` key.
+    #
+    # We could instead lean on `except` for this, but that leaves open the question of
+    # what's to be done if there's an `include` entry *and* other entries. This way is
+    # nicely unambiguous.
+    #
+    # We could use dispatch rather than an `if` for this, but there are limited types we can
+    # end up with here, so this seems most direct.
+    if payload isa AbstractDict
 
-    # Now process the "except"s.
+        # Let any other keys in the dictionary overwrite what we loaded. (The file *doing*
+        # the including can overwrite anything that it includes.)
+        payload = OrderedDict(
+            k => haskey(d, k) ? d[k] : payload[k]
+            for k in union(keys(payload), keys(d)) if k != include_key
+        )
+
+    end
+
+    # Now process the "except"s. Note that the exceptions may, themselves, have includes, so
+    # we'll need to expand those.
     if haskey(include, "except")
         for exception in include["except"]
-            make_exception!(d, exception["path"], exception["value"])
+            expanded_value = expand_include_files(
+                exception["value"],
+                dir,
+                load_dict;
+                include_key,
+            )
+            make_exception!(payload, exception["path"], expanded_value)
         end
     end
 
-    return d
+    return payload
 
 end
 
@@ -540,11 +574,11 @@ function fetch_included_file(d, dir, include::AbstractString, load_dict; include
 end
 
 # Replace "include" with a dictionary loaded from the given file name.
-function expand_include_files(d, dir, load_dict; include_key = "include")
+function expand_include_files(d::AbstractDict, dir, load_dict; include_key = "include")
 
-    # First, do this recursively on all keys that are dictionaries.
+    # First, do this recursively on all elements
     for k in keys(d)
-        if k != include_key && d[k] isa AbstractDict
+        if k != include_key
             d[k] = expand_include_files(d[k], dir, load_dict; include_key)
         end
     end
@@ -558,6 +592,14 @@ function expand_include_files(d, dir, load_dict; include_key = "include")
     # Return the possibly updated, possibly completely replaced dictionary.
     return d
 
+end
+function expand_include_files(d::Vector, dir, load_dict; include_key = "include")
+    return map(d) do v
+        expand_include_files(v, dir, load_dict; include_key)
+    end
+end
+function expand_include_files(d, dir, load_dict; include_key = "include")
+    return d
 end
 
 ##############

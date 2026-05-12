@@ -464,6 +464,10 @@ end
     @test grandma.child.child.name == "Grandchild 1"
     @test grandma.child.child.sibling.name == "Grandchild 2"
 
+    vector_includes = load_from_yaml("vector_include.yaml")
+    @test vector_includes["items"][1]["name"] == "expanded"
+    @test !haskey(vector_includes["items"][1], "include")
+
 end
 
 @testset "exceptions" begin
@@ -471,7 +475,11 @@ end
     x = load_from_yaml("exceptions/exceptions.yaml")
     @test x["rosaceae"]["pyrus"] == ["communis"]
     @test x["rosaceae"]["malus"] == ["domestica", "fusca"]
-    @test x["rosaceae"]["sorbus"] == ["aucuparia"]
+    @test x["rosaceae"]["sorbus"] == ["aucuparia", "reducta", "pratti"]
+    @test x["rosaceae"]["notes"] == "There are a lot more species to add here."
+
+    y = load_from_yaml("exceptions/relative_exception.yaml")
+    @test y["rosaceae"]["sorbus"] == ["aucuparia", "reducta", "pratti"]
 
     @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
     @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")
