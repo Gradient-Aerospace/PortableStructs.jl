@@ -5,3 +5,6 @@ include:
       value:
         - domestica
         - fusca
+    - path: rosaceae.sorbus
+      value:
+        include: sorbus_list.yaml

@@ -471,7 +471,7 @@ end
     x = load_from_yaml("exceptions/exceptions.yaml")
     @test x["rosaceae"]["pyrus"] == ["communis"]
     @test x["rosaceae"]["malus"] == ["domestica", "fusca"]
-    @test x["rosaceae"]["sorbus"] == ["aucuparia"]
+    @test x["rosaceae"]["sorbus"] == ["aucuparia", "reducta", "pratti"]
 
     @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
     @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")

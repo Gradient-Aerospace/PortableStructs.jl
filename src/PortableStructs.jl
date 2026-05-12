@@ -521,10 +521,17 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
     # allowed to overwrite the child).
     d = merge(subdict, d)
 
-    # Now process the "except"s.
+    # Now process the "except"s. Note that the exceptions may, themselves, have includes, so
+    # we'll need to expand those.
     if haskey(include, "except")
         for exception in include["except"]
-            make_exception!(d, exception["path"], exception["value"])
+            expanded_value = expand_include_files(
+                exception["value"],
+                dirname(filename),
+                load_dict;
+                include_key,
+            )
+            make_exception!(d, exception["path"], expanded_value)
         end
     end
 
@@ -540,9 +547,9 @@ function fetch_included_file(d, dir, include::AbstractString, load_dict; include
 end
 
 # Replace "include" with a dictionary loaded from the given file name.
-function expand_include_files(d, dir, load_dict; include_key = "include")
+function expand_include_files(d::AbstractDict, dir, load_dict; include_key = "include")
 
-    # First, do this recursively on all keys that are dictionaries.
+    # First, do this recursively on all elements that are dictionaries.
     for k in keys(d)
         if k != include_key && d[k] isa AbstractDict
             d[k] = expand_include_files(d[k], dir, load_dict; include_key)
@@ -558,6 +565,14 @@ function expand_include_files(d, dir, load_dict; include_key = "include")
     # Return the possibly updated, possibly completely replaced dictionary.
     return d
 
+end
+function expand_include_files(d::Vector, dir, load_dict; include_key = "include")
+    return map(d) do v
+        expand_include_files(v, dir, load_dict; include_key)
+    end
+end
+function expand_include_files(d, dir, load_dict; include_key = "include")
+    return d
 end
 
 ##############
