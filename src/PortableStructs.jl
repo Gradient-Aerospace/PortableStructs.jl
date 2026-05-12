@@ -506,7 +506,7 @@ end
 
 function check_exception_index(v, index, path)
     @assert index >= 1 "While overwriting the value in \"$path\", a non-positive index was encountered, but indices should be 1-indexed."
-    @assert index <= length(v) "While overwriting the value in \"$path\", index [$index] was not found. Available indices: 1:$(length(v))."
+    @assert index <= length(v) "While overwriting the value in \"$path\", index $index was not found. Available indices: 1:$(length(v))."
 end
 
 function make_exception!(d::AbstractDict, path, value)

@@ -489,8 +489,8 @@ end
 
     @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
     @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")
-    @test_throws "index [3] was not found" load_from_yaml("exceptions/bad_vector_exception.yaml")
-    @test_throws "vector indices are 1-based" load_from_yaml("exceptions/bad_zero_vector_exception.yaml")
+    @test_throws "index 3 was not found" load_from_yaml("exceptions/bad_vector_exception.yaml")
+    @test_throws "a non-positive index was encountered" load_from_yaml("exceptions/bad_zero_vector_exception.yaml")
 
 end
 
