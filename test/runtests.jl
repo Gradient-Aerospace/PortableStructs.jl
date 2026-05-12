@@ -65,6 +65,16 @@ end
     d::Tuple{Int64, String}
 end
 
+abstract type TaggedConfig end
+abstract type OtherTaggedConfig end
+
+# This intentionally does not have a keyword constructor. It exercises the fallback that
+# constructs from positional arguments when dict keys exactly match field names.
+struct PositionalOnly
+    a::Int
+    b::TaggedConfig
+end
+
 function a_function_to_call(; x::Int64, y::String)
     return (x, y)
 end
@@ -74,9 +84,6 @@ end
     child::Union{Person, Nothing} = nothing
     sibling::Union{Person, Nothing} = nothing
 end
-
-abstract type TaggedConfig end
-abstract type OtherTaggedConfig end
 
 # These tiny types exercise tagged dictionary loading without leaning on the larger
 # round-trip fixtures below.
@@ -264,6 +271,34 @@ end
     @test named_tuple.leaf isa TaggedConfigLeaf
     @test named_tuple.leaf.x == 2
     @test named_tuple.count == 3
+
+    # Types without keyword constructors can still load when the dict keys exactly match
+    # field names. The input order should not matter; construction uses the type's field order.
+    positional = PortableStructs.from_dict(
+        PositionalOnly,
+        OrderedDict(
+            "b" => tagged_leaf,
+            "a" => "5",
+        );
+        type_key,
+        base_module,
+    )
+    @test positional.a == 5
+    @test positional.b isa TaggedConfigLeaf
+    @test positional.b.x == 2
+
+    # Positional fallback should stay narrow: extra or missing keys mean the dict does not
+    # unambiguously map to the type's fields.
+    @test_throws "Could not construct" PortableStructs.from_dict(
+        PositionalOnly,
+        OrderedDict(
+            "a" => "5",
+            "b" => tagged_leaf,
+            "extra" => true,
+        );
+        type_key,
+        base_module,
+    )
 
     source_dict = OrderedDict(
         type_key => "ignored",

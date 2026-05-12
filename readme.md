@@ -101,7 +101,7 @@ A YAML file can be "included" at any level. This allows the user to break up a l
 
 This package is meant to be simple, and that simplicity comes from several constraints:
 
-* The user's structs will be constructed entirely from keyword arguments, one for each field, so they must have constructors that support this (such as by adding `@kwdef` in front of the struct definition).
+* The user's structs will be constructed either from keyword arguments or from positional arguments. For positional arguments, the YAML/JSON file should have a key matching each field name, and the arguments will be provided to the constructor in the order of the field names (*not* in the order in which they're encountered in the YAML/JSON file).
 * The type of each struct will show up in the YAML file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
 * This isn't meant to be fast or efficient.
 

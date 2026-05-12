@@ -367,6 +367,35 @@ function constructor_arguments(::Function, dict; type_key, base_module)
     )
 end
 
+function keys_matching_fieldnames(type::Type, dict; type_key)
+
+    field_names = fieldnames(type)
+    candidate_keys = [key for key in keys(dict) if key != type_key]
+    if length(candidate_keys) != length(field_names)
+        return nothing
+    end
+
+    keys_by_field = Dict{Symbol, Any}()
+    for key in candidate_keys
+        field_name = try
+            Symbol(key)
+        catch
+            return nothing
+        end
+        if haskey(keys_by_field, field_name)
+            return nothing
+        end
+        keys_by_field[field_name] = key
+    end
+
+    if Set(keys(keys_by_field)) != Set(field_names)
+        return nothing
+    end
+
+    return Tuple(keys_by_field[field_name] for field_name in field_names)
+
+end
+
 # Once a tagged value has been constructed, make sure it fits the type requested by the
 # caller or by the containing field. The explicit `convert` keeps useful Julia conversions
 # available without mixing that concern into name resolution or field walking.
@@ -417,12 +446,21 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         children = constructor_arguments(T, dict; type_key, base_module)
         return T(; children...)
 
-    end
+    elseif isconcretetype(T)
 
-    # If there was no keyword constructor, see if the keys of the dict map
-    # to the field names of the type, and if so, construct the type.
-    #
-    # TODO: Make this happen!
+        # If there is no keyword constructor, fall back to positional construction only
+        # when the dict keys exactly match the field names. Values are decoded in field
+        # order so the input mapping order does not affect construction.
+        field_keys = keys_matching_fieldnames(T, dict; type_key)
+        if !isnothing(field_keys)
+            args = Tuple(
+                from_dict(fieldtype(T, field_name), dict[key]; type_key, base_module)
+                for (field_name, key) in zip(fieldnames(T), field_keys)
+            )
+            return T(args...)
+        end
+
+    end
 
     error(
         """
