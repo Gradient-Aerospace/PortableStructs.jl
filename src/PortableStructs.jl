@@ -554,7 +554,7 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
         for exception in include["except"]
             expanded_value = expand_include_files(
                 exception["value"],
-                dirname(filename),
+                dir,
                 load_dict;
                 include_key,
             )

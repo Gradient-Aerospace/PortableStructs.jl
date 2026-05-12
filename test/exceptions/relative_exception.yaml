@@ -1,0 +1,6 @@
+include:
+  source: nested/roses.yaml
+  except:
+    - path: rosaceae.sorbus
+      value:
+        include: sorbus_list.yaml
