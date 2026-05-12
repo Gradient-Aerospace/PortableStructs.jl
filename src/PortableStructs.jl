@@ -259,15 +259,6 @@ end
 
 # Dicts
 
-# If we need a dict with string keys, well, that's what the RHS is already, right? But we
-# still need to dive in and attempt to from_dict each element.
-function from_dict(::Type{T}, v::AbstractDict; type_key, kwargs...) where {T <: AbstractDict{String, VT}} where {VT}
-    return T(
-        key => from_dict(VT, el; type_key, kwargs...)
-        for (key, el) in pairs(v) if key != type_key
-    )
-end
-
 # If the eltype of the dict is known, we can use that.
 function from_dict(t::Type{Dict{KT, VT}}, v::AbstractDict; type_key, kwargs...) where {KT <: AbstractString, VT}
     return Dict{KT, VT}(
@@ -300,7 +291,7 @@ function from_dict(t::Type{AbstractDict}, v::AbstractDict; type_key, kwargs...)
 end
 function from_dict(t::Type{AbstractDict{S, T}}, v::AbstractDict; type_key, kwargs...) where {S, T}
     return OrderedDict{S, T}(
-        key => from_dict(Any, el; type_key, kwargs...)
+        S(key) => from_dict(T, el; type_key, kwargs...)
         for (key, el) in pairs(v) if key != type_key
     )
 end
