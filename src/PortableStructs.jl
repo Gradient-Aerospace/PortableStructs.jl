@@ -75,7 +75,7 @@ using OrderedCollections: OrderedDict
 # * Float64 -> Convert to the desired number type.
 # * String  -> Convert to the string, enum, char, rational, or complex.
 # * Date    -> These aren't handled right now. (Dates should be strings and use quotes.)
-# * Vector  -> Convert each element to the eltype of the left-hand side and construct the vector, ntuple, or tuple.
+# * Vector  -> Convert each element to the eltype of the left-hand side and construct the vector, matrix, ntuple, or tuple.
 # * Dict    -> Convert each element to the eltype of the LHS and construct the type, named tuple, or dict.
 #
 
@@ -211,11 +211,48 @@ function from_dict(::Type{<:Function}, v::String; base_module, kwargs...)
 
 end
 
-# Vectors and tuples
+# Vectors, matrices, and tuples
 
 # # If we're loading up a vector, from_dict each element individually.
 function from_dict(t::Type{<:Vector}, v::Vector; kwargs...)
     return [from_dict(eltype(t), el; kwargs...) for el in v]
+end
+
+# Matrices are represented in YAML/JSON as row vectors, e.g. `[[1, 2], [3, 4]]`.
+function _matrix_column_count(rows::Vector)
+    isempty(rows) && return 0
+    all(row -> row isa AbstractVector, rows) ||
+        error("Could not construct a matrix from row data; each row must be a vector.")
+
+    ncols = length(first(rows))
+    all(row -> length(row) == ncols, rows) ||
+        error("Could not construct a matrix from row data; all rows must have the same length.")
+    return ncols
+end
+
+function _matrix_from_rows(::Type{T}, rows::Vector; kwargs...) where {T}
+    ncols = _matrix_column_count(rows)
+    matrix = Matrix{T}(undef, length(rows), ncols)
+    for i in eachindex(rows), j in 1:ncols
+        matrix[i, j] = from_dict(T, rows[i][j]; kwargs...)
+    end
+    return matrix
+end
+
+function _inferred_matrix_from_rows(rows::Vector; kwargs...)
+    ncols = _matrix_column_count(rows)
+    return [
+        from_dict(Any, rows[i][j]; kwargs...)
+        for i in eachindex(rows), j in 1:ncols
+    ]
+end
+
+function from_dict(::Type{Matrix{T}}, rows::Vector; kwargs...) where {T}
+    return _matrix_from_rows(T, rows; kwargs...)
+end
+
+function from_dict(::Type{Matrix}, rows::Vector; kwargs...)
+    return _inferred_matrix_from_rows(rows; kwargs...)
 end
 
 # NTuples are like vectors; from_dict each element individually inside a tuple.
@@ -792,6 +829,10 @@ to_dict(v::Symbol; kwargs...) = string(v)
 to_dict(v::Enum; kwargs...) = string(v)
 to_dict(v::Function; kwargs...) = repr(v)
 to_dict(v::AbstractVector; kwargs...) = [to_dict(el; kwargs...) for el in v]
+to_dict(v::AbstractMatrix; kwargs...) = [
+    [to_dict(v[i, j]; kwargs...) for j in axes(v, 2)]
+    for i in axes(v, 1)
+]
 to_dict(v::Tuple; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::NamedTuple; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 to_dict(v::AbstractDict; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))

@@ -53,6 +53,12 @@ end
     q::NTuple{N, Float64}
 end
 
+@kwdef struct TypeWithMatrixFields
+    floats::Matrix{Float64}
+    ints::Matrix{Int}
+    inferred::Matrix
+end
+
 @kwdef struct MyTypeWithAFieldCalledType
     type::String
     x::Float64
@@ -227,6 +233,100 @@ end
     for fn in fieldnames(TypeWithMoreComplexFields)
         @test getfield(y, fn) == getfield(z, fn)
     end
+
+end
+
+@testset "matrix loading" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+
+    floats = PortableStructs.from_dict(
+        Matrix{Float64},
+        Any[Any[1.0, 2.5], Any[3.0, 4.0]];
+        type_key,
+        base_module,
+    )
+    @test floats isa Matrix{Float64}
+    @test floats == [1.0 2.5; 3.0 4.0]
+
+    ints = PortableStructs.from_dict(
+        Matrix{Int},
+        Any[Any["1", "2"], Any["3", "4"]];
+        type_key,
+        base_module,
+    )
+    @test ints isa Matrix{Int}
+    @test ints == [1 2; 3 4]
+
+    inferred = PortableStructs.from_dict(
+        Matrix,
+        [[1.0, 2.0], [3.0, 4.0]];
+        type_key,
+        base_module,
+    )
+    @test inferred isa Matrix{Float64}
+    @test inferred == [1.0 2.0; 3.0 4.0]
+
+    tagged_leaf = OrderedDict(type_key => "TaggedConfigLeaf", "x" => 7)
+    tagged = PortableStructs.from_dict(
+        Matrix{TaggedConfig},
+        [[tagged_leaf, tagged_leaf]];
+        type_key,
+        base_module,
+    )
+    @test tagged isa Matrix{TaggedConfig}
+    @test tagged[1, 1] isa TaggedConfigLeaf
+    @test tagged[1, 1].x == 7
+
+    @test_throws "each row must be a vector" PortableStructs.from_dict(
+        Matrix{Float64},
+        Any[Any[1.0, 2.0], 3.0];
+        type_key,
+        base_module,
+    )
+    @test_throws "all rows must have the same length" PortableStructs.from_dict(
+        Matrix{Float64},
+        Any[Any[1.0, 2.0], Any[3.0]];
+        type_key,
+        base_module,
+    )
+
+    mkpath("out")
+    matrix_yaml = """
+    floats:
+      - [1.0, 2.5]
+      - [3.0, 4.0]
+    ints:
+      - ["1", "2"]
+      - ["3", "4"]
+    inferred:
+      - [1.0, 2.0]
+      - [3.0, 4.0]
+    """
+    write("out/matrix_fields.yaml", matrix_yaml)
+
+    loaded = load_from_yaml(
+        "out/matrix_fields.yaml",
+        TypeWithMatrixFields;
+        base_module,
+    )
+    @test loaded.floats isa Matrix{Float64}
+    @test loaded.floats == [1.0 2.5; 3.0 4.0]
+    @test loaded.ints isa Matrix{Int}
+    @test loaded.ints == [1 2; 3 4]
+    @test loaded.inferred isa Matrix{Float64}
+    @test loaded.inferred == [1.0 2.0; 3.0 4.0]
+
+    write_to_yaml("out/matrix_fields_roundtrip.yaml", loaded)
+    roundtrip = load_from_yaml(
+        "out/matrix_fields_roundtrip.yaml",
+        TypeWithMatrixFields;
+        base_module,
+    )
+    @test roundtrip.floats == loaded.floats
+    @test roundtrip.ints == loaded.ints
+    @test roundtrip.inferred == loaded.inferred
 
 end
 
