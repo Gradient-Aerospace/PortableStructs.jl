@@ -240,10 +240,11 @@ end
 
     type_key = "type"
     base_module = @__MODULE__
+    matrix_dict(rows; type_key = "type") = OrderedDict(type_key => "Matrix", "rows" => rows)
 
     floats = PortableStructs.from_dict(
         Matrix{Float64},
-        Any[Any[1.0, 2.5], Any[3.0, 4.0]];
+        matrix_dict(Any[Any[1.0, 2.5], Any[3.0, 4.0]]);
         type_key,
         base_module,
     )
@@ -252,7 +253,7 @@ end
 
     ints = PortableStructs.from_dict(
         Matrix{Int},
-        Any[Any["1", "2"], Any["3", "4"]];
+        matrix_dict(Any[Any["1", "2"], Any["3", "4"]]);
         type_key,
         base_module,
     )
@@ -261,7 +262,7 @@ end
 
     inferred = PortableStructs.from_dict(
         Matrix,
-        [[1.0, 2.0], [3.0, 4.0]];
+        matrix_dict([[1.0, 2.0], [3.0, 4.0]]);
         type_key,
         base_module,
     )
@@ -271,7 +272,7 @@ end
     tagged_leaf = OrderedDict(type_key => "TaggedConfigLeaf", "x" => 7)
     tagged = PortableStructs.from_dict(
         Matrix{TaggedConfig},
-        [[tagged_leaf, tagged_leaf]];
+        matrix_dict([[tagged_leaf, tagged_leaf]]);
         type_key,
         base_module,
     )
@@ -281,13 +282,36 @@ end
 
     @test_throws "each row must be a vector" PortableStructs.from_dict(
         Matrix{Float64},
-        Any[Any[1.0, 2.0], 3.0];
+        matrix_dict(Any[Any[1.0, 2.0], 3.0]);
         type_key,
         base_module,
     )
     @test_throws "all rows must have the same length" PortableStructs.from_dict(
         Matrix{Float64},
-        Any[Any[1.0, 2.0], Any[3.0]];
+        matrix_dict(Any[Any[1.0, 2.0], Any[3.0]]);
+        type_key,
+        base_module,
+    )
+    @test_throws "rows must be a vector" PortableStructs.from_dict(
+        Matrix{Float64},
+        OrderedDict(type_key => "Matrix", "rows" => 1.0);
+        type_key,
+        base_module,
+    )
+    @test_throws "\"rows\" key was missing" PortableStructs.from_dict(
+        Matrix{Float64},
+        OrderedDict(type_key => "Matrix");
+        type_key,
+        base_module,
+    )
+    vector_tagged_matrix = OrderedDict(
+        type_key => "Vector",
+        "rows"   => Any[Any[1.0, 2.0]],
+    )
+    matrix_type_error = "Could not construct a matrix from a \"Vector\" type tag"
+    @test_throws matrix_type_error PortableStructs.from_dict(
+        Matrix{Float64},
+        vector_tagged_matrix;
         type_key,
         base_module,
     )
@@ -295,14 +319,20 @@ end
     mkpath("out")
     matrix_yaml = """
     floats:
-      - [1.0, 2.5]
-      - [3.0, 4.0]
+      type: Matrix
+      rows:
+        - [1.0, 2.5]
+        - [3.0, 4.0]
     ints:
-      - ["1", "2"]
-      - ["3", "4"]
+      type: Matrix
+      rows:
+        - ["1", "2"]
+        - ["3", "4"]
     inferred:
-      - [1.0, 2.0]
-      - [3.0, 4.0]
+      type: Matrix
+      rows:
+        - [1.0, 2.0]
+        - [3.0, 4.0]
     """
     write("out/matrix_fields.yaml", matrix_yaml)
 
@@ -319,6 +349,14 @@ end
     @test loaded.inferred == [1.0 2.0; 3.0 4.0]
 
     write_to_yaml("out/matrix_fields_roundtrip.yaml", loaded)
+    roundtrip_dict = load_file("out/matrix_fields_roundtrip.yaml")
+    @test roundtrip_dict["floats"][type_key] == "Matrix"
+    @test roundtrip_dict["floats"]["rows"] == [[1.0, 2.5], [3.0, 4.0]]
+    @test roundtrip_dict["ints"][type_key] == "Matrix"
+    @test roundtrip_dict["ints"]["rows"] == [[1, 2], [3, 4]]
+    @test roundtrip_dict["inferred"][type_key] == "Matrix"
+    @test roundtrip_dict["inferred"]["rows"] == [[1.0, 2.0], [3.0, 4.0]]
+
     roundtrip = load_from_yaml(
         "out/matrix_fields_roundtrip.yaml",
         TypeWithMatrixFields;
@@ -327,6 +365,11 @@ end
     @test roundtrip.floats == loaded.floats
     @test roundtrip.ints == loaded.ints
     @test roundtrip.inferred == loaded.inferred
+
+    write_to_yaml("out/matrix_fields_custom_type_key.yaml", loaded; type_key = "_type")
+    custom_type_key_dict = load_file("out/matrix_fields_custom_type_key.yaml")
+    @test custom_type_key_dict["floats"]["_type"] == "Matrix"
+    @test custom_type_key_dict["floats"]["rows"] == [[1.0, 2.5], [3.0, 4.0]]
 
 end
 
