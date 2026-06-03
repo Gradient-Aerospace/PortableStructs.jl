@@ -111,12 +111,12 @@ function matrix_rows_to_dict(v::AbstractMatrix; kwargs...)
 end
 
 """
-    to_dict(v::AbstractMatrix; type_key, kwargs...)
+    to_dict(v::Matrix; type_key, kwargs...)
 
 Builds the explicit PortableStructs matrix representation, with serialized rows under a
 `rows` key and a configurable matrix type tag.
 """
-function to_dict(v::AbstractMatrix; type_key, kwargs...)
+function to_dict(v::Matrix; type_key, kwargs...)
     return OrderedDict(
         type_key => "Matrix",
         "rows"   => matrix_rows_to_dict(v; type_key, kwargs...),
