@@ -1,5 +1,9 @@
 # PortableStructs.jl Change Log
 
+## Unreleased
+
+* Added support for reading and writing the `Matrix` type.
+
 ## v1.0.0
 
 * Added typed structural loading and writing through `from_dict` and `to_dict`.
