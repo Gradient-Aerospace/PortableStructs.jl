@@ -786,8 +786,6 @@ The keyword arguments come directly from the format-specific write functions, su
 """
 function to_dict end
 
-include("matrix.jl")
-
 to_dict(v::Unsigned; kwargs...) = string(v) # Numbers load as Int64 which can't store a UInt64, so we store and load unsigned numbers as strings.
 to_dict(v::Union{Integer, AbstractFloat, AbstractIrrational}; kwargs...) = v
 to_dict(v::AbstractString; kwargs...) = v
@@ -800,11 +798,11 @@ to_dict(v::Tuple; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::NamedTuple; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 to_dict(v::AbstractDict; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 
+# Try to figure out the type. This will search for Module.Submodule.Type. Any type
+# parameters will be dropped. Dropping parameters is intentional here: when loading,
+# field annotations and keyword constructors usually reconstruct concrete parameters
+# from the child values. Keeping this in one helper makes that policy easy to revisit.
 function type_tag(v)
-    # Try to figure out the type. This will search for Module.Submodule.Type. Any type
-    # parameters will be dropped. Dropping parameters is intentional here: when loading,
-    # field annotations and keyword constructors usually reconstruct concrete parameters
-    # from the child values. Keeping this in one helper makes that policy easy to revisit.
     m = match(r"^(\w+\.)*(\w+)", string(typeof(v)))
     if isnothing(m)
         error("The string, $v, could not be interpreted as a type.")
@@ -814,15 +812,20 @@ end
 
 # The generic write path mirrors the generic load path: emit a type tag, then emit one
 # recursively encoded entry per field. Specialized `to_dict` methods can replace this for
-# compact or semantic representations, such as storing a filename instead of a large payload.
+# compact or semantic representations, such as storing a filename instead of a large
+# payload.
 function to_dict(v; type_key)
     dict = OrderedDict{String, Any}(type_key => type_tag(v))
     for fn in fieldnames(typeof(v))
         dict[string(fn)] = to_dict(getfield(v, fn); type_key)
     end
-
     return dict
-
 end
+
+###############
+# Other Types #
+###############
+
+include("matrix.jl")
 
 end # module PortableStructs
