@@ -242,6 +242,8 @@ end
     base_module = @__MODULE__
     matrix_dict(rows; type_key = "type") = OrderedDict(type_key => "Matrix", "rows" => rows)
 
+    # Matrix dictionaries should recursively decode their rows into the requested element
+    # type, including scalar conversions.
     floats = PortableStructs.from_dict(
         Matrix{Float64},
         matrix_dict(Any[Any[1.0, 2.5], Any[3.0, 4.0]]);
@@ -260,6 +262,7 @@ end
     @test ints isa Matrix{Int}
     @test ints == [1 2; 3 4]
 
+    # Bare Matrix annotations should infer the element type from decoded row entries.
     inferred = PortableStructs.from_dict(
         Matrix,
         matrix_dict([[1.0, 2.0], [3.0, 4.0]]);
@@ -269,6 +272,7 @@ end
     @test inferred isa Matrix{Float64}
     @test inferred == [1.0 2.0; 3.0 4.0]
 
+    # Matrix entries should preserve the existing tagged abstract-type loading behavior.
     tagged_leaf = OrderedDict(type_key => "TaggedConfigLeaf", "x" => 7)
     tagged = PortableStructs.from_dict(
         Matrix{TaggedConfig},
@@ -280,6 +284,7 @@ end
     @test tagged[1, 1] isa TaggedConfigLeaf
     @test tagged[1, 1].x == 7
 
+    # Matrix dictionaries should fail clearly when the required row structure is invalid.
     @test_throws "each row must be a vector" PortableStructs.from_dict(
         Matrix{Float64},
         matrix_dict(Any[Any[1.0, 2.0], 3.0]);
@@ -316,6 +321,7 @@ end
         base_module,
     )
 
+    # YAML loading should use the canonical explicit representation for matrix fields.
     mkpath("out")
     matrix_yaml = """
     floats:
@@ -348,6 +354,8 @@ end
     @test loaded.inferred isa Matrix{Float64}
     @test loaded.inferred == [1.0 2.0; 3.0 4.0]
 
+    # Roundtrip writing should preserve matrix intent instead of writing vector-of-vector
+    # row lists that would load ambiguously without a field annotation.
     write_to_yaml("out/matrix_fields_roundtrip.yaml", loaded)
     roundtrip_dict = load_file("out/matrix_fields_roundtrip.yaml")
     @test roundtrip_dict["floats"][type_key] == "Matrix"
@@ -366,6 +374,7 @@ end
     @test roundtrip.ints == loaded.ints
     @test roundtrip.inferred == loaded.inferred
 
+    # Matrix serialization should honor a custom type key just like other tagged values.
     write_to_yaml("out/matrix_fields_custom_type_key.yaml", loaded; type_key = "_type")
     custom_type_key_dict = load_file("out/matrix_fields_custom_type_key.yaml")
     @test custom_type_key_dict["floats"]["_type"] == "Matrix"
