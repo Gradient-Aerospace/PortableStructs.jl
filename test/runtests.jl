@@ -53,6 +53,12 @@ end
     q::NTuple{N, Float64}
 end
 
+@kwdef struct TypeWithMatrixFields
+    floats::Matrix{Float64}
+    ints::Matrix{Int}
+    inferred::Matrix
+end
+
 @kwdef struct MyTypeWithAFieldCalledType
     type::String
     x::Float64
@@ -227,6 +233,152 @@ end
     for fn in fieldnames(TypeWithMoreComplexFields)
         @test getfield(y, fn) == getfield(z, fn)
     end
+
+end
+
+@testset "matrix loading" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+    matrix_dict(rows; type_key = "type") = OrderedDict(type_key => "Matrix", "rows" => rows)
+
+    # Matrix dictionaries should recursively decode their rows into the requested element
+    # type, including scalar conversions.
+    floats = PortableStructs.from_dict(
+        Matrix{Float64},
+        matrix_dict(Any[Any[1.0, 2.5], Any[3.0, 4.0]]);
+        type_key,
+        base_module,
+    )
+    @test floats isa Matrix{Float64}
+    @test floats == [1.0 2.5; 3.0 4.0]
+
+    ints = PortableStructs.from_dict(
+        Matrix{Int},
+        matrix_dict(Any[Any["1", "2"], Any["3", "4"]]);
+        type_key,
+        base_module,
+    )
+    @test ints isa Matrix{Int}
+    @test ints == [1 2; 3 4]
+
+    # Bare Matrix annotations should infer the element type from decoded row entries.
+    inferred = PortableStructs.from_dict(
+        Matrix,
+        matrix_dict([[1.0, 2.0], [3.0, 4.0]]);
+        type_key,
+        base_module,
+    )
+    @test inferred isa Matrix{Float64}
+    @test inferred == [1.0 2.0; 3.0 4.0]
+
+    # Matrix entries should preserve the existing tagged abstract-type loading behavior.
+    tagged_leaf = OrderedDict(type_key => "TaggedConfigLeaf", "x" => 7)
+    tagged = PortableStructs.from_dict(
+        Matrix{TaggedConfig},
+        matrix_dict([[tagged_leaf, tagged_leaf]]);
+        type_key,
+        base_module,
+    )
+    @test tagged isa Matrix{TaggedConfig}
+    @test tagged[1, 1] isa TaggedConfigLeaf
+    @test tagged[1, 1].x == 7
+
+    # Matrix dictionaries should fail clearly when the required row structure is invalid.
+    @test_throws "each row must be a vector" PortableStructs.from_dict(
+        Matrix{Float64},
+        matrix_dict(Any[Any[1.0, 2.0], 3.0]);
+        type_key,
+        base_module,
+    )
+    @test_throws "all rows must have the same length" PortableStructs.from_dict(
+        Matrix{Float64},
+        matrix_dict(Any[Any[1.0, 2.0], Any[3.0]]);
+        type_key,
+        base_module,
+    )
+    @test_throws "rows must be a vector" PortableStructs.from_dict(
+        Matrix{Float64},
+        OrderedDict(type_key => "Matrix", "rows" => 1.0);
+        type_key,
+        base_module,
+    )
+    @test_throws "\"rows\" key was missing" PortableStructs.from_dict(
+        Matrix{Float64},
+        OrderedDict(type_key => "Matrix");
+        type_key,
+        base_module,
+    )
+    vector_tagged_matrix = OrderedDict(
+        type_key => "Vector",
+        "rows"   => Any[Any[1.0, 2.0]],
+    )
+    matrix_type_error = "Could not construct a matrix from a \"Vector\" type tag"
+    @test_throws matrix_type_error PortableStructs.from_dict(
+        Matrix{Float64},
+        vector_tagged_matrix;
+        type_key,
+        base_module,
+    )
+
+    # YAML loading should use the canonical explicit representation for matrix fields.
+    mkpath("out")
+    matrix_yaml = """
+    floats:
+      type: Matrix
+      rows:
+        - [1.0, 2.5]
+        - [3.0, 4.0]
+    ints:
+      type: Matrix
+      rows:
+        - ["1", "2"]
+        - ["3", "4"]
+    inferred:
+      type: Matrix
+      rows:
+        - [1.0, 2.0]
+        - [3.0, 4.0]
+    """
+    write("out/matrix_fields.yaml", matrix_yaml)
+
+    loaded = load_from_yaml(
+        "out/matrix_fields.yaml",
+        TypeWithMatrixFields;
+        base_module,
+    )
+    @test loaded.floats isa Matrix{Float64}
+    @test loaded.floats == [1.0 2.5; 3.0 4.0]
+    @test loaded.ints isa Matrix{Int}
+    @test loaded.ints == [1 2; 3 4]
+    @test loaded.inferred isa Matrix{Float64}
+    @test loaded.inferred == [1.0 2.0; 3.0 4.0]
+
+    # Roundtrip writing should preserve matrix intent instead of writing vector-of-vector
+    # row lists that would load ambiguously without a field annotation.
+    write_to_yaml("out/matrix_fields_roundtrip.yaml", loaded)
+    roundtrip_dict = load_file("out/matrix_fields_roundtrip.yaml")
+    @test roundtrip_dict["floats"][type_key] == "Matrix"
+    @test roundtrip_dict["floats"]["rows"] == [[1.0, 2.5], [3.0, 4.0]]
+    @test roundtrip_dict["ints"][type_key] == "Matrix"
+    @test roundtrip_dict["ints"]["rows"] == [[1, 2], [3, 4]]
+    @test roundtrip_dict["inferred"][type_key] == "Matrix"
+    @test roundtrip_dict["inferred"]["rows"] == [[1.0, 2.0], [3.0, 4.0]]
+
+    roundtrip = load_from_yaml(
+        "out/matrix_fields_roundtrip.yaml",
+        TypeWithMatrixFields;
+        base_module,
+    )
+    @test roundtrip.floats == loaded.floats
+    @test roundtrip.ints == loaded.ints
+    @test roundtrip.inferred == loaded.inferred
+
+    # Matrix serialization should honor a custom type key just like other tagged values.
+    write_to_yaml("out/matrix_fields_custom_type_key.yaml", loaded; type_key = "_type")
+    custom_type_key_dict = load_file("out/matrix_fields_custom_type_key.yaml")
+    @test custom_type_key_dict["floats"]["_type"] == "Matrix"
+    @test custom_type_key_dict["floats"]["rows"] == [[1.0, 2.5], [3.0, 4.0]]
 
 end
 

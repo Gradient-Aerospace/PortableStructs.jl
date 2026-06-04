@@ -75,8 +75,10 @@ using OrderedCollections: OrderedDict
 # * Float64 -> Convert to the desired number type.
 # * String  -> Convert to the string, enum, char, rational, or complex.
 # * Date    -> These aren't handled right now. (Dates should be strings and use quotes.)
-# * Vector  -> Convert each element to the eltype of the left-hand side and construct the vector, ntuple, or tuple.
-# * Dict    -> Convert each element to the eltype of the LHS and construct the type, named tuple, or dict.
+# * Vector  -> Convert each element to the eltype of the left-hand side and construct the
+#              vector, ntuple, or tuple.
+# * Dict    -> Convert each element to the eltype of the LHS and construct the type, matrix,
+#              named tuple, or dict.
 #
 
 #########################
@@ -796,11 +798,11 @@ to_dict(v::Tuple; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::NamedTuple; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 to_dict(v::AbstractDict; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 
+# Try to figure out the type. This will search for Module.Submodule.Type. Any type
+# parameters will be dropped. Dropping parameters is intentional here: when loading,
+# field annotations and keyword constructors usually reconstruct concrete parameters
+# from the child values. Keeping this in one helper makes that policy easy to revisit.
 function type_tag(v)
-    # Try to figure out the type. This will search for Module.Submodule.Type. Any type
-    # parameters will be dropped. Dropping parameters is intentional here: when loading,
-    # field annotations and keyword constructors usually reconstruct concrete parameters
-    # from the child values. Keeping this in one helper makes that policy easy to revisit.
     m = match(r"^(\w+\.)*(\w+)", string(typeof(v)))
     if isnothing(m)
         error("The string, $v, could not be interpreted as a type.")
@@ -810,15 +812,20 @@ end
 
 # The generic write path mirrors the generic load path: emit a type tag, then emit one
 # recursively encoded entry per field. Specialized `to_dict` methods can replace this for
-# compact or semantic representations, such as storing a filename instead of a large payload.
+# compact or semantic representations, such as storing a filename instead of a large
+# payload.
 function to_dict(v; type_key)
     dict = OrderedDict{String, Any}(type_key => type_tag(v))
     for fn in fieldnames(typeof(v))
         dict[string(fn)] = to_dict(getfield(v, fn); type_key)
     end
-
     return dict
-
 end
+
+###############
+# Other Types #
+###############
+
+include("matrix.jl")
 
 end # module PortableStructs
