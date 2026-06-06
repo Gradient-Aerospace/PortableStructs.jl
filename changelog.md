@@ -1,6 +1,6 @@
 # PortableStructs.jl Change Log
 
-## Unreleased
+## v1.1.0
 
 * Added support for reading and writing the `Matrix` type.
 
