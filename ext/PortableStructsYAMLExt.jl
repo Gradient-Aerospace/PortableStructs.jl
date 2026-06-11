@@ -41,8 +41,13 @@ function PortableStructs.write_yaml_dict(filename::AbstractString, dict)
     return nothing
 end
 
-function PortableStructs.write_to_yaml(filename::AbstractString, v; type_key = "type")
-    dict = PortableStructs.to_dict(v; type_key)
+function PortableStructs.write_to_yaml(
+    filename::AbstractString,
+    v;
+    type_key = "type",
+    base_module = Main,
+)
+    dict = PortableStructs.to_dict(v; type_key, base_module)
     return PortableStructs.write_yaml_dict(filename, dict)
 end
 

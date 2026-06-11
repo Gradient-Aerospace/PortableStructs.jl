@@ -44,8 +44,14 @@ function PortableStructs.write_json_dict(filename::AbstractString, dict; indent 
     return nothing
 end
 
-function PortableStructs.write_to_json(filename::AbstractString, v; type_key = "type", indent = 4)
-    dict = PortableStructs.to_dict(v; type_key)
+function PortableStructs.write_to_json(
+    filename::AbstractString,
+    v;
+    type_key = "type",
+    base_module = Main,
+    indent = 4,
+)
+    dict = PortableStructs.to_dict(v; type_key, base_module)
     return PortableStructs.write_json_dict(filename, dict; indent)
 end
 

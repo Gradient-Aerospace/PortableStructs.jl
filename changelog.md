@@ -1,5 +1,9 @@
 # PortableStructs.jl Change Log
 
+## Unreleased
+
+* Added support for enums in nested modules. All enums are now written with explicit module paths like `ModuleA.SubModule1.Fruits.mango`.
+
 ## v1.1.0
 
 * Added support for reading and writing the `Matrix` type.

@@ -165,14 +165,26 @@ function from_dict(t::Type{<:AbstractChar}, v::String; kwargs...)
     return only(v)
 end
 
-# Enums can come from strings.
-function from_dict(t::Type{<:Enum}, v::String; kwargs...)
+# Enums can come from strings. Some enum packages, such as EnumX, may be written in scoped
+# form by users or external tools. Scoped spellings should resolve to a concrete binding so
+# we do not accept a value from the wrong enum just because its final name matches.
+function from_dict(t::Type{<:Enum}, v::String; base_module = Main, kwargs...)
+
+    if occursin('.', v)
+        value = resolve_name(v; base_module)
+        if value isa t
+            return value
+        end
+        error("\"$v\" did not map to any enum of type $t.")
+    end
+
     for i in instances(t)
         if string(i) == v
             return i
         end
     end
     error("\"$v\" did not map to any enum of type $t.")
+
 end
 
 # Not all strings can become symbols, but we'll give it a try.
@@ -314,21 +326,47 @@ from `base_module`. A future public API could replace or wrap this function with
 allow-list or registry without changing how recursive conversion or construction works.
 """
 function resolve_name(name::AbstractString; base_module)
+
     module_name = base_module
     module_path = split(name, ".")
-    for k in 1:length(module_path)-1
+
+    # Names are usually relative to `base_module`, but serialized values may also carry
+    # absolute Julia roots, such as `Main.A.B.x`. Ordinary modules expose these roots as
+    # bindings, so `getfield(base_module, :Main)` would usually work. We still handle them
+    # explicitly so absolute names always start from the intended root module, including
+    # cases like resolving `Base.x` from a `baremodule`, where `Base` is not bound.
+    first_index = if first(module_path) == "Main"
+        module_name = Main
+        2
+    elseif first(module_path) == "Base"
+        module_name = Base
+        2
+    elseif first(module_path) == "Core"
+        module_name = Core
+        2
+    else
+        1
+    end
+
+    if first_index > length(module_path)
+        return module_name
+    end
+
+    for k in first_index:length(module_path)-1
         try
             module_name = getfield(module_name, Symbol(module_path[k]))
         catch err
             error("Could not find the $(module_path[k]) module in the $module_name module.")
         end
     end
+
     binding_symbol = Symbol(last(module_path))
     return try
         getfield(module_name, binding_symbol)
     catch err
         error("The $binding_symbol type/function could not be found in $module_name.")
     end
+
 end
 
 function resolve_name(name; base_module)
@@ -690,6 +728,7 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the YAML is used to say which type should be used
   in construction. Default: "type".
+* `base_module`: The module from which enum value names should be written. Default: Main
 """
 function write_to_yaml end
 
@@ -735,6 +774,7 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the JSON is used to say which type should be used
   in construction. Default: "type".
+* `base_module`: The module from which enum value names should be written. Default: Main
 * `indent`: Determines the number of spaces used when pretty-printing JSON. Default: 4.
 """
 function write_to_json end
@@ -791,12 +831,31 @@ to_dict(v::Union{Integer, AbstractFloat, AbstractIrrational}; kwargs...) = v
 to_dict(v::AbstractString; kwargs...) = v
 to_dict(v::AbstractChar; kwargs...) = v
 to_dict(v::Symbol; kwargs...) = string(v)
-to_dict(v::Enum; kwargs...) = string(v)
 to_dict(v::Function; kwargs...) = repr(v)
 to_dict(v::AbstractVector; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::Tuple; kwargs...) = [to_dict(el; kwargs...) for el in v]
 to_dict(v::NamedTuple; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
 to_dict(v::AbstractDict; kwargs...) = OrderedDict(string(k) => to_dict(el; kwargs...) for (k, el) in pairs(v))
+
+function module_path_from(base_module::Module, module_name::Module)
+    module_path = fullname(module_name)
+    base_path = fullname(base_module)
+    if (
+        length(module_path) >= length(base_path) &&
+        module_path[1:length(base_path)] == base_path
+    )
+        return module_path[length(base_path)+1:end]
+    else
+        return module_path
+    end
+end
+
+function enum_tag(v::Enum; base_module)
+    module_path = string.(module_path_from(base_module, parentmodule(typeof(v))))
+    return join((module_path..., string(v)), ".")
+end
+
+to_dict(v::Enum; base_module = Main, kwargs...) = enum_tag(v; base_module)
 
 # Try to figure out the type. This will search for Module.Submodule.Type. Any type
 # parameters will be dropped. Dropping parameters is intentional here: when loading,
@@ -814,10 +873,10 @@ end
 # recursively encoded entry per field. Specialized `to_dict` methods can replace this for
 # compact or semantic representations, such as storing a filename instead of a large
 # payload.
-function to_dict(v; type_key)
+function to_dict(v; type_key, kwargs...)
     dict = OrderedDict{String, Any}(type_key => type_tag(v))
     for fn in fieldnames(typeof(v))
-        dict[string(fn)] = to_dict(getfield(v, fn); type_key)
+        dict[string(fn)] = to_dict(getfield(v, fn); type_key, kwargs...)
     end
     return dict
 end
