@@ -8,6 +8,18 @@ using JSON
 
 @enum Fruit guava cantaloupe
 
+module EnumXFixtures
+    using EnumX
+    @enumx ScopedEnum scoped_value other_value
+    @enumx OtherScopedEnum scoped_value
+end
+
+module NestedEnumFixtures
+    module Nested
+        @enum NestedFruit nested_apple nested_pear
+    end
+end
+
 struct MyParseableType
     int::Int64
 end
@@ -29,6 +41,14 @@ Base.parse(::Type{MyParseableType}, s::AbstractString) = MyParseableType(parse(I
     m::Symbol
     o::Xoshiro
     p::UInt64
+end
+
+@kwdef struct TypeWithEnumX
+    value::EnumXFixtures.ScopedEnum.T
+end
+
+@kwdef struct TypeWithNestedEnum
+    value::NestedEnumFixtures.Nested.NestedFruit
 end
 
 function Base.:(==)(a::MyConcreteType, b::MyConcreteType)
@@ -204,6 +224,105 @@ end
         @test getfield(x, fn) == getfield(y, fn)
     end
 
+end
+
+@testset "scoped enums" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+
+    # EnumX values are often referred to through their generated module. When the target
+    # field type is already known, the loader should accept that scoped spelling.
+    scoped_value = PortableStructs.from_dict(
+        EnumXFixtures.ScopedEnum.T,
+        "EnumXFixtures.ScopedEnum.scoped_value";
+        type_key,
+        base_module,
+    )
+    @test scoped_value === EnumXFixtures.ScopedEnum.scoped_value
+
+    # The plain spelling should continue to work for generated EnumX values, just like it
+    # does for Base.@enum values.
+    plain_value = PortableStructs.from_dict(
+        EnumXFixtures.ScopedEnum.T,
+        "other_value";
+        type_key,
+        base_module,
+    )
+    @test plain_value === EnumXFixtures.ScopedEnum.other_value
+
+    # This is the structured path that originally failed: a YAML scalar names a scoped
+    # EnumX value, and the containing field annotation supplies the enum type.
+    enumx_yaml = """
+    value: EnumXFixtures.ScopedEnum.scoped_value
+    """
+    write("out/enumx.yaml", enumx_yaml)
+    loaded = load_from_yaml("out/enumx.yaml", TypeWithEnumX; base_module)
+    @test loaded.value === EnumXFixtures.ScopedEnum.scoped_value
+
+    # Matching only the leaf binding name would incorrectly accept this value, since both
+    # enum modules define `scoped_value`. A scoped string must resolve to the expected enum
+    # type, not merely to an enum value with the same final name.
+    wrong_enum_message = "\"EnumXFixtures.OtherScopedEnum.scoped_value\" did not map"
+    @test_throws wrong_enum_message PortableStructs.from_dict(
+        EnumXFixtures.ScopedEnum.T,
+        "EnumXFixtures.OtherScopedEnum.scoped_value";
+        type_key,
+        base_module,
+    )
+
+    # Round-tripped EnumX values should be written as bindings relative to the same base
+    # module used for loading.
+    x = TypeWithEnumX(; value = EnumXFixtures.ScopedEnum.other_value)
+    write_to_yaml("out/enumx_roundtrip.yaml", x; base_module)
+    enumx_roundtrip_dict = load_file("out/enumx_roundtrip.yaml")
+    @test enumx_roundtrip_dict["value"] == "EnumXFixtures.ScopedEnum.other_value"
+    roundtrip = load_from_yaml("out/enumx_roundtrip.yaml"; base_module)
+    @test roundtrip.value === x.value
+
+    write_to_json("out/enumx_roundtrip.json", x; base_module)
+    enumx_json_dict = JSON.parsefile("out/enumx_roundtrip.json")
+    @test enumx_json_dict["value"] == "EnumXFixtures.ScopedEnum.other_value"
+    json_roundtrip = load_from_json("out/enumx_roundtrip.json"; base_module)
+    @test json_roundtrip.value === x.value
+
+    # The same binding-path representation should work for ordinary `Base.@enum` values
+    # inside nested modules.
+    nested = TypeWithNestedEnum(;
+        value = NestedEnumFixtures.Nested.nested_apple,
+    )
+    write_to_yaml("out/nested_base_enum_roundtrip.yaml", nested; base_module)
+    nested_roundtrip_dict = load_file("out/nested_base_enum_roundtrip.yaml")
+    @test nested_roundtrip_dict["value"] == "NestedEnumFixtures.Nested.nested_apple"
+    nested_roundtrip = load_from_yaml(
+        "out/nested_base_enum_roundtrip.yaml";
+        base_module,
+    )
+    @test nested_roundtrip.value === nested.value
+
+end
+
+module ModuleA
+    module ModuleA1
+        @enum Fruit apple=71 banana
+    end
+end
+
+@kwdef struct TypeWithModuleEnum
+    value::ModuleA.ModuleA1.Fruit
+end
+
+@testset "enums in modules" begin
+    enums_in_modules_yaml = """
+    value: ModuleA.ModuleA1.apple
+    """
+    write("out/enums_in_modules.yaml", enums_in_modules_yaml)
+    loaded = load_from_yaml(
+        "out/enums_in_modules.yaml",
+        TypeWithModuleEnum;
+        base_module = @__MODULE__,
+    )
+    @test loaded.value === ModuleA.ModuleA1.apple
 end
 
 # Here, we test abstract types and unions, where we don't know what the left-hand side needs
