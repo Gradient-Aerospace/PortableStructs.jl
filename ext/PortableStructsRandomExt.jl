@@ -3,12 +3,9 @@ module PortableStructsRandomExt
 import PortableStructs
 using Random: Xoshiro
 
-# Xoshiro has no keyword constructor, so the generic field-to-keyword path in core cannot
-# rebuild it. This adapter belongs in an extension because it is support for one external
-# type, not part of the format-agnostic struct codec itself.
-#
-# The method reconstructs Xoshiro from its stored fields. That is necessarily tied to the
-# type's field layout, so keeping it isolated makes the maintenance risk obvious.
+# Xoshiro is an external collection of RNG state, so its reconstruction policy lives in an
+# extension rather than the format-agnostic struct codec itself. The method reconstructs
+# Xoshiro from its stored fields, which is necessarily tied to the type's field layout.
 function PortableStructs.from_dict(
     ::Type{Xoshiro},
     v::AbstractDict{<:AbstractString, <:Any};
