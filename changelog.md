@@ -3,6 +3,8 @@
 ## Unreleased
 
 * Added support for construction from non-conrete types, like `UnitRange` (instead of `UnitRange{Int64}`).
+* Removed (now unnecessary) extension for `Random`.
+* Added compatibility for `OrderedCollections` v2.0.
 
 ## v1.2.0
 

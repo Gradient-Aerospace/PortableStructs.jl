@@ -103,7 +103,6 @@ end
 
 struct FieldMatchingButNoFieldConstructor
     x::Int
-
     FieldMatchingButNoFieldConstructor(x::String) = new(parse(Int, x))
 end
 
