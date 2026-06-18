@@ -51,6 +51,15 @@ end
     value::NestedEnumFixtures.Nested.NestedFruit
 end
 
+# We use this as a type that PackageArtifactFixtures doesn't know about in the base_module
+# testing.
+module OtherModule
+    @kwdef struct OtherType
+        value::Int64
+    end
+end
+
+# This tests reading and writing "from" a module, where the base_module is this module.
 module PackageArtifactFixtures
 
     using PortableStructs
@@ -59,12 +68,15 @@ module PackageArtifactFixtures
         x::Int
     end
 
-    @kwdef struct Wrapper
+    # This type is parameterized so that we can make sure using types that this module
+    # doesn't even know about is ok.
+    @kwdef struct Wrapper{T}
         leaf::Leaf
+        other::T
     end
 
-    function write_yaml_artifact(file)
-        artifact = Wrapper(; leaf = Leaf(; x = 7))
+    function write_yaml_artifact(file; other)
+        artifact = Wrapper(; leaf = Leaf(; x = 7), other)
         PortableStructs.write_to_yaml(file, artifact; base_module = @__MODULE__)
         return nothing
     end
@@ -73,8 +85,8 @@ module PackageArtifactFixtures
         return PortableStructs.load_from_yaml(file; base_module = @__MODULE__)
     end
 
-    function write_json_artifact(file)
-        artifact = Wrapper(; leaf = Leaf(; x = 7))
+    function write_json_artifact(file; other)
+        artifact = Wrapper(; leaf = Leaf(; x = 7), other)
         PortableStructs.write_to_json(file, artifact; base_module = @__MODULE__)
         return nothing
     end
@@ -212,11 +224,15 @@ end
 
 @testset "base_module type tags" begin
 
+    # We'll make a type that our PackageArtifactFixtures module doesn't know about.
+    other = OtherModule.OtherType(1)
+
     # By default, type tags are written relative to Main. This keeps the ordinary script and
     # REPL path working, where user modules are commonly available below Main.
     default_file = "out/default_base_module_type_tag.yaml"
     default_artifact = PackageArtifactFixtures.Wrapper(;
         leaf = PackageArtifactFixtures.Leaf(; x = 3),
+        other,
     )
     write_to_yaml(default_file, default_artifact)
     default_dict = load_file(default_file)
@@ -228,7 +244,7 @@ end
     # Package code can choose its own module as the base. Then package-owned artifacts can
     # be written and reloaded without requiring the package module to be bound in Main.
     package_yaml_file = "out/package_base_module_type_tag.yaml"
-    PackageArtifactFixtures.write_yaml_artifact(package_yaml_file)
+    PackageArtifactFixtures.write_yaml_artifact(package_yaml_file; other)
     package_yaml_dict = load_file(package_yaml_file)
     @test package_yaml_dict["type"] == "Wrapper"
     @test package_yaml_dict["leaf"]["type"] == "Leaf"
@@ -236,7 +252,7 @@ end
     @test package_yaml_roundtrip.leaf.x == 7
 
     package_json_file = "out/package_base_module_type_tag.json"
-    PackageArtifactFixtures.write_json_artifact(package_json_file)
+    PackageArtifactFixtures.write_json_artifact(package_json_file; other)
     package_json_dict = JSON.parsefile(package_json_file)
     @test package_json_dict["type"] == "Wrapper"
     @test package_json_dict["leaf"]["type"] == "Leaf"
