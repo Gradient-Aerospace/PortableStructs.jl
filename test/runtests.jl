@@ -51,6 +51,40 @@ end
     value::NestedEnumFixtures.Nested.NestedFruit
 end
 
+module PackageArtifactFixtures
+
+    using PortableStructs
+
+    @kwdef struct Leaf
+        x::Int
+    end
+
+    @kwdef struct Wrapper
+        leaf::Leaf
+    end
+
+    function write_yaml_artifact(file)
+        artifact = Wrapper(; leaf = Leaf(; x = 7))
+        PortableStructs.write_to_yaml(file, artifact; base_module = @__MODULE__)
+        return nothing
+    end
+
+    function load_yaml_artifact(file)
+        return PortableStructs.load_from_yaml(file; base_module = @__MODULE__)
+    end
+
+    function write_json_artifact(file)
+        artifact = Wrapper(; leaf = Leaf(; x = 7))
+        PortableStructs.write_to_json(file, artifact; base_module = @__MODULE__)
+        return nothing
+    end
+
+    function load_json_artifact(file)
+        return PortableStructs.load_from_json(file; base_module = @__MODULE__)
+    end
+
+end
+
 function Base.:(==)(a::MyConcreteType, b::MyConcreteType)
     return all(
         ismissing(getfield(a, fn)) ? ismissing(getfield(b, fn)) :
@@ -173,6 +207,41 @@ mkpath("out")
     # Load in the YAML and see if everything's as it was.
     y = load_from_yaml("out/my_concrete_type_with_custom_type_key.yaml"; type_key = "_type")
     @test x == y
+
+end
+
+@testset "base_module type tags" begin
+
+    # By default, type tags are written relative to Main. This keeps the ordinary script and
+    # REPL path working, where user modules are commonly available below Main.
+    default_file = "out/default_base_module_type_tag.yaml"
+    default_artifact = PackageArtifactFixtures.Wrapper(;
+        leaf = PackageArtifactFixtures.Leaf(; x = 3),
+    )
+    write_to_yaml(default_file, default_artifact)
+    default_dict = load_file(default_file)
+    @test default_dict["type"] == "PackageArtifactFixtures.Wrapper"
+    @test default_dict["leaf"]["type"] == "PackageArtifactFixtures.Leaf"
+    default_roundtrip = load_from_yaml(default_file)
+    @test default_roundtrip.leaf.x == 3
+
+    # Package code can choose its own module as the base. Then package-owned artifacts can
+    # be written and reloaded without requiring the package module to be bound in Main.
+    package_yaml_file = "out/package_base_module_type_tag.yaml"
+    PackageArtifactFixtures.write_yaml_artifact(package_yaml_file)
+    package_yaml_dict = load_file(package_yaml_file)
+    @test package_yaml_dict["type"] == "Wrapper"
+    @test package_yaml_dict["leaf"]["type"] == "Leaf"
+    package_yaml_roundtrip = PackageArtifactFixtures.load_yaml_artifact(package_yaml_file)
+    @test package_yaml_roundtrip.leaf.x == 7
+
+    package_json_file = "out/package_base_module_type_tag.json"
+    PackageArtifactFixtures.write_json_artifact(package_json_file)
+    package_json_dict = JSON.parsefile(package_json_file)
+    @test package_json_dict["type"] == "Wrapper"
+    @test package_json_dict["leaf"]["type"] == "Leaf"
+    package_json_roundtrip = PackageArtifactFixtures.load_json_artifact(package_json_file)
+    @test package_json_roundtrip.leaf.x == 7
 
 end
 

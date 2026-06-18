@@ -108,7 +108,7 @@ trees:
   - scientific_name: Arbutus unedo
     common_name: strawberry tree
   - scientific_name: Arbutus menziesii
-    common_name: Pacific madrone
+    common_name: madrona
 notes: Needs review.
 ```
 
@@ -119,7 +119,7 @@ include:
   source: trees.yaml
   except:
     - path: trees[2].common_name
-      value: madrona
+      value: Pacific madrone
     - path: notes
       value: Reviewed.
 ```

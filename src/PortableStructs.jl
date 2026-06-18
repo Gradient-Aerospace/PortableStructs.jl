@@ -758,7 +758,8 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the YAML is used to say which type should be used
   in construction. Default: "type".
-* `base_module`: The module from which enum value names should be written. Default: Main
+* `base_module`: The module from which type and enum value names should be written.
+  Default: Main
 """
 function write_to_yaml end
 
@@ -804,7 +805,8 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the JSON is used to say which type should be used
   in construction. Default: "type".
-* `base_module`: The module from which enum value names should be written. Default: Main
+* `base_module`: The module from which type and enum value names should be written.
+  Default: Main
 * `indent`: Determines the number of spaces used when pretty-printing JSON. Default: 4.
 """
 function write_to_json end
@@ -887,26 +889,43 @@ end
 
 to_dict(v::Enum; base_module = Main, kwargs...) = enum_tag(v; base_module)
 
+function binding_tag(value, base_module::Module, binding_symbol::Symbol)
+
+    # If the requested base module already has this exact binding, use that local name.
+    # This preserves compact tags like `Xoshiro` when a script imports `Random: Xoshiro`
+    # and writes with the default `base_module = Main`.
+    if (
+        isdefined(base_module, binding_symbol) &&
+        getfield(base_module, binding_symbol) === value
+    )
+        return string(binding_symbol)
+    end
+
+    # Otherwise, write the path from the requested base module to the binding's defining
+    # module. This lets package code choose `base_module = @__MODULE__` and write its own
+    # types as package-relative tags that can be loaded from the same base module later.
+    module_path = string.(module_path_from(base_module, parentmodule(value)))
+    return join((module_path..., string(binding_symbol)), ".")
+
+end
+
 # Try to figure out the type. This will search for Module.Submodule.Type. Any type
 # parameters will be dropped. Dropping parameters is intentional here: when loading, field
 # annotations and constructors usually reconstruct concrete parameters from the child
 # values. Keeping this in one helper makes that policy easy to revisit.
-function type_tag(v)
-    m = match(r"^(\w+\.)*(\w+)", string(typeof(v)))
-    if isnothing(m)
-        error("The string, $v, could not be interpreted as a type.")
-    end
-    return m.match
+function type_tag(v; base_module = Main)
+    type = typeof(v)
+    return binding_tag(type, base_module, nameof(type))
 end
 
 # The generic write path mirrors the generic load path: emit a type tag, then emit one
 # recursively encoded entry per field. Specialized `to_dict` methods can replace this for
 # compact or semantic representations, such as storing a filename instead of a large
 # payload.
-function to_dict(v; type_key, kwargs...)
-    dict = OrderedDict{String, Any}(type_key => type_tag(v))
+function to_dict(v; type_key, base_module = Main, kwargs...)
+    dict = OrderedDict{String, Any}(type_key => type_tag(v; base_module))
     for fn in fieldnames(typeof(v))
-        dict[string(fn)] = to_dict(getfield(v, fn); type_key, kwargs...)
+        dict[string(fn)] = to_dict(getfield(v, fn); type_key, base_module, kwargs...)
     end
     return dict
 end
