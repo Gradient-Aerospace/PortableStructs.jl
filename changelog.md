@@ -1,5 +1,9 @@
 # PortableStructs.jl Change Log
 
+## Unreleased
+
+* Added support for construction from non-conrete types, like `UnitRange` (instead of `UnitRange{Int64}`).
+
 ## v1.2.0
 
 * Added support for enums in nested modules. All enums are now written with explicit module paths like `ModuleA.SubModule1.Fruits.mango`.
