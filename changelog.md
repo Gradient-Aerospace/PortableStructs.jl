@@ -5,6 +5,7 @@
 * Added support for construction from non-conrete types, like `UnitRange` (instead of `UnitRange{Int64}`).
 * Removed (now unnecessary) extension for `Random`.
 * Added compatibility for `OrderedCollections` v2.0.
+* Added behavior to resolve types in modules like was already done for enums.
 
 ## v1.2.0
 

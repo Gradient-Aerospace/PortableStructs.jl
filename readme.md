@@ -30,6 +30,8 @@ import YAML
 my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
 ```
 
+## YAML Example
+
 Here's an example.
 
 ```
@@ -81,7 +83,9 @@ MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
 
 The `type` can be a type or a function to call with keyword arguments.
 
-The same dictionary representation can be written to JSON. The JSON methods are available once `JSON` is loaded:
+## JSON Example
+
+The same dictionary representation from above can be written to JSON. The JSON methods are available once `JSON` is loaded:
 
 ```
 import PortableStructs
@@ -97,6 +101,8 @@ If the desired output type is known, pass it as the second argument:
 y = PortableStructs.load_from_json("my_struct.json", MyType)
 ```
 
+## Includes and Exceptions
+
 A YAML file can be "included" at any level. This allows the user to break up a large YAML file into smaller ones. By default, the key `include` will be used to indicate what file to include. The `include_key` keyword argument to `load_from_yaml` can specify a different key to use (e.g., `_include`). When including files, the file name is assumed to be relative to the file that has the "include" in it (or an absolute path).
 
 Includes can also provide `except` entries to overwrite values from the included file. Exception paths use dot-separated dictionary keys. They can also target existing vector elements with 1-based indices, matching Julia's indexing. For example, `trees[2].common_name` overwrites the `common_name` key in the second element of the `trees` vector. Vector indices must already exist; exceptions do not append to vectors or create missing vector entries.
@@ -108,7 +114,7 @@ trees:
   - scientific_name: Arbutus unedo
     common_name: strawberry tree
   - scientific_name: Arbutus menziesii
-    common_name: Pacific madrone
+    common_name: madrona
 notes: Needs review.
 ```
 
@@ -119,27 +125,66 @@ include:
   source: trees.yaml
   except:
     - path: trees[2].common_name
-      value: madrona
+      value: Pacific madrone
     - path: notes
       value: Reviewed.
 ```
 
 Loading the second file produces the included data with the second tree's common name changed and the top-level `notes` value replaced. The `trees[2]` path uses Julia-style 1-based indexing.
 
+## Type Names and `base_module`
+
+PortableStructs writes type names and resolves type names relative to a `base_module`. By
+default, `base_module = Main`, which is a good match for scripts and REPL work where the
+types being loaded are available from `Main`.
+
+Package code that writes its own artifacts can choose the package module as the base module
+instead. Use the same `base_module` when loading as was used when writing.
+
+```
+module MyPackage
+
+using PortableStructs
+
+@kwdef struct Config
+    gain::Float64
+end
+
+function save_config(file, config)
+    PortableStructs.write_to_yaml(file, config; base_module = @__MODULE__)
+    return nothing
+end
+
+function load_config(file)
+    return PortableStructs.load_from_yaml(file; base_module = @__MODULE__)
+end
+
+end
+```
+
+With `base_module = @__MODULE__`, the YAML can use a package-relative type tag:
+
+```yaml
+type: Config
+gain: 1.0
+```
+
+Without that explicit `base_module`, the default `Main`-relative representation would need
+to name a type that can be resolved from `Main`.
+
+## Constraints
+
 This package is meant to be simple, and that simplicity comes from several constraints:
 
-* The user's structs will be constructed either from keyword arguments or from positional
-  arguments. For positional arguments, the YAML/JSON file should have a key matching each
-  field name, and the arguments will be provided to the constructor in the order of the
-  field names (*not* in the order in which they're encountered in the YAML/JSON file).
-* The type of each struct will show up in the YAML file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
+* The user's structs will be constructed either from keyword arguments or from positional arguments. For positional arguments, the YAML/JSON file should have a key matching each field name, and the arguments will be provided to the constructor in the order of the field names (*not* in the order in which they're encountered in the YAML/JSON file).
+* The type of each struct will show up in the YAML/JSON file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
 * This isn't meant to be fast or efficient.
 
 There is overlap with the functionality in StructTypes, and that package is more mature than this with far more support in the package ecosystem. However, it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.
 
 YAML and JSON support are provided by package extensions. This means `PortableStructs` itself does not depend directly on either parser. Load `YAML` before calling `load_from_yaml` or `write_to_yaml`, and load `JSON` before calling `load_from_json` or `write_to_json`.
 
-## Extension points
+## Extension Points
 
 PortableStructs has two main customization hooks.
 
@@ -159,6 +204,6 @@ The parser-specific dictionary functions live at the file-format boundary:
 
 These functions are implemented by the YAML and JSON extensions. They are useful if you want to work directly at the dictionary layer, or if you are writing another format extension and want to mirror the same pattern: parse a file into dictionaries, let PortableStructs expand includes and construct values, then write dictionaries back out.
 
-Design notes:
+## Design Notes
 
 * The key reason this package exists, instead of just using StructTypes, is that this handles abstract types where the potential subtypes of the abstract type aren't known (one can't write a `StructTypes.subtypes` function to resolve which abstract type should be constructed).
