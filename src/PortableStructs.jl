@@ -34,9 +34,8 @@ my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
 
 This package is meant to be simple, and that simplicity comes from several constraints:
 
-* The user's structs will be constructed entirely from keyword arguments, one for each
-  field, so they must have constructors that support this (such as by adding `@kwdef` in
-  front of the struct definition).
+* The user's structs will be constructed from keyword arguments when possible, or from
+  positional arguments when the input keys exactly match the type's field names.
 * The type of each struct will show up in the YAML file with a key called "type" (or
   whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and
   `load_from_yaml`). Hence no struct is allowed have a field with this name.
@@ -381,10 +380,10 @@ function resolve_constructor_tag(dict; type_key, base_module)
     error("The \"$(dict[type_key])\" tag resolved to $target, which is not a type or function.")
 end
 
-# This is the recursive conversion stage for composite values. For a concrete type, every
-# key in the dictionary corresponds to a field, and the field type tells us how to decode
-# that raw parsed value. This is what lets a vector field apply conversion to each
-# element, or an abstract field receive a tagged concrete value.
+# This is the recursive conversion stage for composite values. For a type with field
+# annotations, each field type tells us how to decode that raw parsed value. This is what
+# lets a vector field apply conversion to each element, or an abstract field receive a
+# tagged concrete value.
 function constructor_arguments(type::Type, dict; type_key, base_module)
     return NamedTuple(
         Symbol(k) => from_dict(
@@ -409,7 +408,12 @@ end
 
 function keys_matching_fieldnames(type::Type, dict; type_key)
 
-    field_names = fieldnames(type)
+    field_names = try
+        fieldnames(type)
+    catch
+        return nothing
+    end
+
     candidate_keys = [key for key in keys(dict) if key != type_key]
     if length(candidate_keys) != length(field_names)
         return nothing
@@ -436,6 +440,34 @@ function keys_matching_fieldnames(type::Type, dict; type_key)
 
 end
 
+function positional_constructor_arguments(type::Type, dict; type_key, base_module)
+
+    field_keys = keys_matching_fieldnames(type, dict; type_key)
+    if isnothing(field_keys)
+        return nothing
+    end
+
+    field_names = fieldnames(type)
+    args = Tuple(
+        from_dict(fieldtype(type, field_name), dict[key]; type_key, base_module)
+        for (field_name, key) in zip(field_names, field_keys)
+    )
+    arg_types = Tuple{map(typeof, args)...}
+    if hasmethod(type, arg_types)
+        return args
+    end
+
+    error(
+        """
+        Could not construct a $type from the given dictionary.
+
+        The dictionary keys match the fields $field_names.
+        No positional constructor accepts the decoded argument types $arg_types.
+        """
+    )
+
+end
+
 # Once a tagged value has been constructed, make sure it fits the type requested by the
 # caller or by the containing field. The explicit `convert` keeps useful Julia conversions
 # available without mixing that concern into name resolution or field walking.
@@ -448,9 +480,9 @@ function finish_decoded_value(::Type{T}, value) where {T}
 end
 
 # This is for constructing general composite types. If there's a type key, we'll use that
-# and attempt to instantiate that type via keyword arguments. If there's no type key, but
-# the input type is concrete (so, we know the types of the fields), we will try to construct
-# that via keyword arguments, using the appropriate type for each field.
+# and let the resolved type or function drive construction. If there's no type key, we will
+# try keyword construction first, then positional construction when the type's field layout
+# lines up exactly with the dictionary.
 function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs...) where {T}
 
     if haskey(dict, type_key)
@@ -486,17 +518,15 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         children = constructor_arguments(T, dict; type_key, base_module)
         return T(; children...)
 
-    elseif isconcretetype(T)
+    else
 
-        # If there is no keyword constructor, fall back to positional construction only
-        # when the dict keys exactly match the field names. Values are decoded in field
-        # order so the input mapping order does not affect construction.
-        field_keys = keys_matching_fieldnames(T, dict; type_key)
-        if !isnothing(field_keys)
-            args = Tuple(
-                from_dict(fieldtype(T, field_name), dict[key]; type_key, base_module)
-                for (field_name, key) in zip(fieldnames(T), field_keys)
-            )
+        # If there is no keyword constructor, fall back to positional construction when the
+        # dict keys exactly match the field names and the type has a positional constructor
+        # that accepts the decoded arguments. Values are decoded in field order so the input
+        # mapping order does not affect construction. This also covers parametric types with
+        # known field layouts, such as UnitRange.
+        args = positional_constructor_arguments(T, dict; type_key, base_module)
+        if !isnothing(args)
             return T(args...)
         end
 
@@ -858,9 +888,9 @@ end
 to_dict(v::Enum; base_module = Main, kwargs...) = enum_tag(v; base_module)
 
 # Try to figure out the type. This will search for Module.Submodule.Type. Any type
-# parameters will be dropped. Dropping parameters is intentional here: when loading,
-# field annotations and keyword constructors usually reconstruct concrete parameters
-# from the child values. Keeping this in one helper makes that policy easy to revisit.
+# parameters will be dropped. Dropping parameters is intentional here: when loading, field
+# annotations and constructors usually reconstruct concrete parameters from the child
+# values. Keeping this in one helper makes that policy easy to revisit.
 function type_tag(v)
     m = match(r"^(\w+\.)*(\w+)", string(typeof(v)))
     if isnothing(m)

@@ -101,6 +101,11 @@ struct PositionalOnly
     b::TaggedConfig
 end
 
+struct FieldMatchingButNoFieldConstructor
+    x::Int
+    FieldMatchingButNoFieldConstructor(x::String) = new(parse(Int, x))
+end
+
 function a_function_to_call(; x::Int64, y::String)
     return (x, y)
 end
@@ -544,7 +549,8 @@ end
     @test named_tuple.count == 3
 
     # Types without keyword constructors can still load when the dict keys exactly match
-    # field names. The input order should not matter; construction uses the type's field order.
+    # field names. The input order should not matter; construction uses the type's field
+    # order.
     positional = PortableStructs.from_dict(
         PositionalOnly,
         OrderedDict(
@@ -558,6 +564,21 @@ end
     @test positional.b isa TaggedConfigLeaf
     @test positional.b.x == 2
 
+    # Unparameterized parametric types can still expose a definite field layout. UnitRange
+    # is not concrete, but its "start" and "stop" fields map directly to its positional
+    # constructor.
+    unit_range = PortableStructs.from_dict(
+        UnitRange,
+        OrderedDict(
+            "stop" => 2,
+            "start" => 1,
+        );
+        type_key,
+        base_module,
+    )
+    @test unit_range == 1:2
+    @test unit_range isa UnitRange{Int}
+
     # Positional fallback should stay narrow: extra or missing keys mean the dict does not
     # unambiguously map to the type's fields.
     @test_throws "Could not construct" PortableStructs.from_dict(
@@ -567,6 +588,16 @@ end
             "b" => tagged_leaf,
             "extra" => true,
         );
+        type_key,
+        base_module,
+    )
+
+    # Matching the field names alone is not enough; there still needs to be a positional
+    # constructor that accepts the decoded field values.
+    no_constructor_message = "No positional constructor accepts"
+    @test_throws no_constructor_message PortableStructs.from_dict(
+        FieldMatchingButNoFieldConstructor,
+        OrderedDict("x" => "5");
         type_key,
         base_module,
     )

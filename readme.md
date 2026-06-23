@@ -128,7 +128,10 @@ Loading the second file produces the included data with the second tree's common
 
 This package is meant to be simple, and that simplicity comes from several constraints:
 
-* The user's structs will be constructed either from keyword arguments or from positional arguments. For positional arguments, the YAML/JSON file should have a key matching each field name, and the arguments will be provided to the constructor in the order of the field names (*not* in the order in which they're encountered in the YAML/JSON file).
+* The user's structs will be constructed either from keyword arguments or from positional
+  arguments. For positional arguments, the YAML/JSON file should have a key matching each
+  field name, and the arguments will be provided to the constructor in the order of the
+  field names (*not* in the order in which they're encountered in the YAML/JSON file).
 * The type of each struct will show up in the YAML file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
 * This isn't meant to be fast or efficient.
 
@@ -142,7 +145,10 @@ PortableStructs has two main customization hooks.
 
 `PortableStructs.to_dict(v; type_key, kwargs...)` converts a Julia value into the plain Julia data that a file-format extension can write: scalars, vectors, and dictionaries with string keys. Extend this when a type should have a more compact or semantic representation than "all fields plus a type tag". For example, a data-backed object might write only a filename.
 
-`PortableStructs.from_dict(::Type{T}, value; type_key, base_module, kwargs...)` converts parsed data back into `T`. Extend this for types you own when the generic keyword-constructor path is not right. For types owned by other packages, prefer a small adapter package or package extension rather than adding broad methods in reusable libraries.
+`PortableStructs.from_dict(::Type{T}, value; type_key, base_module, kwargs...)` converts
+parsed data back into `T`. Extend this for types you own when the generic construction path
+is not right. For types owned by other packages, prefer a small adapter package or package
+extension rather than adding broad methods in reusable libraries.
 
 The parser-specific dictionary functions live at the file-format boundary:
 
