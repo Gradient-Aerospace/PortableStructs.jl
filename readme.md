@@ -141,6 +141,14 @@ types being loaded are available from `Main`.
 Package code that writes its own artifacts can choose the package module as the base module
 instead. Use the same `base_module` when loading as was used when writing.
 
+Values can also use types from modules outside the chosen `base_module`. In that case,
+PortableStructs writes the type's defining module path, such as `Dates.Date`. When loading,
+it first tries to resolve names relative to `base_module`. If the first name is not present
+there, the loader also accepts explicit roots like `Main`, `Base`, and `Core`, or a module
+binding with that name in `Main`. This means a file written with a given `base_module` and a
+given set of imported modules in `Main` should be loaded with the same `base_module` and the
+same imports available.
+
 ```
 module MyPackage
 
@@ -171,6 +179,23 @@ gain: 1.0
 
 Without that explicit `base_module`, the default `Main`-relative representation would need
 to name a type that can be resolved from `Main`.
+
+For example, `Dates.Date` can round-trip through another base module as long as `Dates` is
+imported when both writing and loading:
+
+```
+import Dates
+import PortableStructs
+import YAML
+
+module C
+end
+
+x = Dates.Date(2026, 6, 24)
+
+PortableStructs.write_to_yaml("date.yaml", x; base_module = C)
+PortableStructs.load_from_yaml("date.yaml"; base_module = C)
+```
 
 ## Constraints
 

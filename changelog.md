@@ -6,6 +6,7 @@
 * Removed (now unnecessary) extension for `Random`.
 * Added compatibility for `OrderedCollections` v2.0.
 * Added behavior to resolve types in modules like was already done for enums.
+* Added behavior to look for modules that aren't defined in `base_module` in `Main`.
 
 ## v1.2.0
 

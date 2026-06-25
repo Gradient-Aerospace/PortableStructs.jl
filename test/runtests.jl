@@ -2,6 +2,7 @@ using Test
 using StaticArrays
 using PortableStructs
 using Random: Xoshiro
+import Dates
 using OrderedCollections: OrderedDict
 using YAML: load_file
 using JSON
@@ -57,6 +58,9 @@ module OtherModule
     @kwdef struct OtherType
         value::Int64
     end
+end
+
+module EmptyBaseModule
 end
 
 # This tests reading and writing "from" a module, where the base_module is this module.
@@ -258,6 +262,17 @@ end
     @test package_json_dict["leaf"]["type"] == "Leaf"
     package_json_roundtrip = PackageArtifactFixtures.load_json_artifact(package_json_file)
     @test package_json_roundtrip.leaf.x == 7
+
+    # Types from loaded modules outside the base module are written with their root module
+    # path. Loading should resolve the same path without requiring the root to be imported
+    # into the chosen base module.
+    date_file = "out/date_with_custom_base_module.yaml"
+    date = Dates.Date(2026, 6, 24)
+    write_to_yaml(date_file, date; base_module = EmptyBaseModule)
+    date_dict = load_file(date_file)
+    @test date_dict["type"] == "Dates.Date"
+    @test !isdefined(EmptyBaseModule, :Dates)
+    @test load_from_yaml(date_file; base_module = EmptyBaseModule) == date
 
 end
 

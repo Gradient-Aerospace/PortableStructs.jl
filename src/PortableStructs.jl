@@ -313,11 +313,42 @@ end
 # Construction of General Types #
 #################################
 
+# This returns the module to use for qualifying a module name for a given type, like
+# `Main.A.B.MyType` or `Dates.Date`. It returns nothing if it can't figure out where the
+# given module is defined.
+function root_module_binding(name::AbstractString)
+
+    # See if it's one of the special case modules.
+    if name == "Main"
+        return Main
+    elseif name == "Base"
+        return Base
+    elseif name == "Core"
+        return Core
+    end
+
+    # Julia does not expose a public API for looking up an arbitrary loaded root module by
+    # name. However, when users write values from a script or REPL, imported packages and
+    # stdlibs are normally available as module bindings in Main. That is enough to resolve
+    # canonical tags like `Dates.Date` without depending on Base.root_module.
+    binding_symbol = Symbol(name)
+    if isdefined(Main, binding_symbol)
+        binding = getfield(Main, binding_symbol)
+        if binding isa Module && nameof(binding) == binding_symbol
+            return binding
+        end
+    end
+
+    return nothing
+
+end
+
 """
     resolve_name(name; base_module)
 
 Resolve a dotted name like `"A.B.C"` by starting at `base_module` and walking through the
-named modules/bindings.
+named modules/bindings. If the first name is not available from `base_module`, it is also
+allowed to name a root module available from `Main`, such as `Dates`.
 
 This is deliberately a tiny, isolated piece of the loader because it is the part with the
 strongest policy implications. Today, PortableStructs trusts the file and resolves names
@@ -328,20 +359,22 @@ function resolve_name(name::AbstractString; base_module)
 
     module_name = base_module
     module_path = split(name, ".")
+    first_symbol = Symbol(first(module_path))
 
     # Names are usually relative to `base_module`, but serialized values may also carry
-    # absolute Julia roots, such as `Main.A.B.x`. Ordinary modules expose these roots as
-    # bindings, so `getfield(base_module, :Main)` would usually work. We still handle them
-    # explicitly so absolute names always start from the intended root module, including
-    # cases like resolving `Base.x` from a `baremodule`, where `Base` is not bound.
-    first_index = if first(module_path) == "Main"
-        module_name = Main
+    # absolute Julia roots, such as `Main.A.B.x`. We handle these explicitly so absolute
+    # names always start from the intended root module, including cases like resolving
+    # `Base.x` from a `baremodule`, where `Base` is not bound.
+    root_module = root_module_binding(first(module_path))
+    first_index = if first(module_path) in ("Main", "Base", "Core")
+        module_name = root_module
         2
-    elseif first(module_path) == "Base"
-        module_name = Base
-        2
-    elseif first(module_path) == "Core"
-        module_name = Core
+    elseif !isdefined(base_module, first_symbol) && !isnothing(root_module)
+        # A package or stdlib root, such as `Dates`, is not inside `base_module`, but it
+        # may be available from Main because the writing/loading script imported it. In
+        # that case, treat the first segment as an absolute root and keep resolving the
+        # rest of the tag from there.
+        module_name = root_module
         2
     else
         1
@@ -352,17 +385,18 @@ function resolve_name(name::AbstractString; base_module)
     end
 
     for k in first_index:length(module_path)-1
-        try
-            module_name = getfield(module_name, Symbol(module_path[k]))
-        catch err
+        next_symbol = Symbol(module_path[k])
+        if isdefined(module_name, next_symbol)
+            module_name = getfield(module_name, next_symbol)
+        else
             error("Could not find the $(module_path[k]) module in the $module_name module.")
         end
     end
 
     binding_symbol = Symbol(last(module_path))
-    return try
-        getfield(module_name, binding_symbol)
-    catch err
+    if isdefined(module_name, binding_symbol)
+        return getfield(module_name, binding_symbol)
+    else
         error("The $binding_symbol type/function could not be found in $module_name.")
     end
 
