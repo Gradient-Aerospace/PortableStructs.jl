@@ -1,6 +1,6 @@
 # PortableStructs.jl Change Log
 
-## Unreleased
+## v1.3.0
 
 * Added support for construction from non-conrete types, like `UnitRange` (instead of `UnitRange{Int64}`).
 * Removed (now unnecessary) extension for `Random`.
