@@ -251,6 +251,44 @@ function from_dict(::Type{Tuple}, v::Vector; kwargs...)
     return Tuple(from_dict(Any, el; kwargs...) for el in v)
 end
 
+# A dictionary representation allows an untyped field to identify itself as a tuple. This
+# is useful because YAML and JSON sequences otherwise decode as vectors when the containing
+# field does not provide a tuple type annotation.
+function from_dict(
+    ::Type{Tuple},
+    v::AbstractDict;
+    type_key,
+    base_module,
+    kwargs...,
+)
+
+    # This method can receive either the original tagged dictionary or the inner dictionary
+    # after the generic tagged-value path has removed the type key.
+    if haskey(v, type_key)
+        target = resolve_constructor_tag(v; type_key, base_module)
+        target === Tuple || throw(ArgumentError(
+            "Could not construct a Tuple from a \"$(v[type_key])\" type tag.",
+        ))
+    end
+
+    allowed_keys = haskey(v, type_key) ? (type_key, "args") : ("args",)
+    unexpected_keys = setdiff(keys(v), allowed_keys)
+    isempty(unexpected_keys) || throw(ArgumentError(
+        "A Tuple dictionary may only contain the '$type_key' and 'args' keys, " *
+        "but also received $(collect(unexpected_keys)).",
+    ))
+
+    haskey(v, "args") || throw(ArgumentError(
+        "Could not construct a Tuple because the \"args\" key was missing.",
+    ))
+    args = v["args"]
+    args isa Vector || throw(ArgumentError(
+        "Could not construct a Tuple because \"args\" must be a sequence.",
+    ))
+    return from_dict(Tuple, args; type_key, base_module, kwargs...)
+
+end
+
 # Named Tuples
 
 # If we seek a fully characterized named tuple but have a dict, let the keys be the names.
