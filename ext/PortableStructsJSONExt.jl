@@ -25,11 +25,20 @@ function PortableStructs.load_from_json(
     filename::AbstractString,
     t::Type;
     type_key = "type",
+    args_key = "args",
+    kwargs_key = "kwargs",
     base_module = Main,
     include_key = "include",
 )
     dict = PortableStructs.load_json_dict(filename; include_key)
-    return PortableStructs.from_dict(t, dict; type_key, base_module)
+    return PortableStructs.from_dict(
+        t,
+        dict;
+        type_key,
+        args_key,
+        kwargs_key,
+        base_module,
+    )
 end
 
 function PortableStructs.load_from_json(filename::AbstractString; kwargs...)

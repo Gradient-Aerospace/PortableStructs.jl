@@ -81,7 +81,47 @@ giving:
 MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
 ```
 
-The `type` can be a type or a function to call with keyword arguments.
+The `type` can identify either a type or a function to call.
+
+## Explicit Constructor Arguments
+
+A typed mapping normally constructs its target from the remaining mapping entries as keyword arguments. Positional arguments can instead be requested explicitly with an ordered `args` sequence. The optional `kwargs` mapping supplies keyword arguments in the same call:
+
+```yaml
+type: MyType
+args:
+  - 12
+  - hello
+kwargs:
+  gain: 2.0
+  enabled: true
+```
+
+This representation calls:
+
+```julia
+MyType(12, "hello"; gain = 2.0, enabled = true)
+```
+
+Types and functions use the same representation. For example, an untyped field can hold a tuple without relying on its field annotation:
+
+```yaml
+size:
+  type: Core.tuple
+  args: [1024, 768]
+```
+
+Every positional and keyword argument is recursively decoded, so arguments can themselves contain tagged values. When either `args` or `kwargs` is present, no other construction keys are allowed alongside them.
+
+The argument keys can be changed when loading if they conflict with fields in a data type:
+
+```julia
+load_from_yaml(
+    "file.yaml";
+    args_key = "positional_args",
+    kwargs_key = "keyword_args",
+)
+```
 
 ## JSON Example
 
@@ -201,8 +241,9 @@ PortableStructs.load_from_yaml("date.yaml"; base_module = C)
 
 This package is meant to be simple, and that simplicity comes from several constraints:
 
-* The user's structs will be constructed either from keyword arguments or from positional arguments. For positional arguments, the YAML/JSON file should have a key matching each field name, and the arguments will be provided to the constructor in the order of the field names (*not* in the order in which they're encountered in the YAML/JSON file).
+* Structs are normally constructed from keyword arguments. A mapping can request explicit positional and keyword arguments with `args` and `kwargs`. As a fallback, mappings whose keys exactly match a type's fields are passed positionally in field-definition order.
 * The type of each struct will show up in the YAML/JSON file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
+* Within a typed mapping, `args` and `kwargs` request explicit construction and are reserved by default. Use `args_key` and `kwargs_key` when loading types with conflicting fields.
 * This isn't meant to be fast or efficient.
 
 There is overlap with the functionality in StructTypes, and that package is more mature than this with far more support in the package ecosystem. However, it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.
