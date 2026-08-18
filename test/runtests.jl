@@ -172,6 +172,19 @@ end
     x::Int
 end
 
+struct ExplicitConstruction
+    number::Int
+    child::TaggedConfig
+    label::String
+end
+function ExplicitConstruction(number::Int, child::TaggedConfig; label::String)
+    return ExplicitConstruction(number, child, label)
+end
+
+function explicit_constructor_function(values; prefix)
+    return (; prefix, values)
+end
+
 # This intentionally has no constructor. It pins down that PortableStructs only chooses a
 # concrete implementation for `AbstractDict` itself, not for arbitrary abstract subtypes.
 abstract type MyAbstractDict{K, V} <: AbstractDict{K, V} end
@@ -603,6 +616,136 @@ end
     custom_type_key_dict = load_file("out/matrix_fields_custom_type_key.yaml")
     @test custom_type_key_dict["floats"]["_type"] == "Matrix"
     @test custom_type_key_dict["floats"]["rows"] == [[1.0, 2.5], [3.0, 4.0]]
+
+end
+
+@testset "explicit constructor arguments" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+    tagged_leaf = OrderedDict(
+        type_key => "TaggedConfigLeaf",
+        "x" => 2,
+    )
+
+    # A sequence under `args` is passed positionally, while the mapping under `kwargs` is
+    # passed by keyword. Both paths recursively decode tagged child values.
+    explicit = PortableStructs.from_dict(
+        Any,
+        OrderedDict(
+            type_key => "ExplicitConstruction",
+            "args" => Any[7, tagged_leaf],
+            "kwargs" => OrderedDict("label" => "direct"),
+        );
+        type_key,
+        base_module,
+    )
+    @test explicit.number == 7
+    @test explicit.child == TaggedConfigLeaf(; x = 2)
+    @test explicit.label == "direct"
+
+    # Keyword-only explicit calls are valid; omitted argument collections are empty.
+    keyword_only = PortableStructs.from_dict(
+        Any,
+        OrderedDict(
+            type_key => "TaggedConfigLeaf",
+            "kwargs" => OrderedDict("x" => 9),
+        );
+        type_key,
+        base_module,
+    )
+    @test keyword_only == TaggedConfigLeaf(; x = 9)
+
+    # Functions and types share the same call mechanism.
+    a_tuple = PortableStructs.from_dict(
+        Any,
+        OrderedDict(
+            type_key => "Core.tuple",
+            "args" => Any[1024, 768],
+        );
+        type_key,
+        base_module,
+    )
+    @test a_tuple == (1024, 768)
+
+    # Recursion continues through untyped argument sequences, rather than stopping at the
+    # parser-produced vector.
+    nested = PortableStructs.from_dict(
+        Any,
+        OrderedDict(
+            type_key => "explicit_constructor_function",
+            "args" => Any[
+                OrderedDict("children" => Any[tagged_leaf]),
+            ],
+            "kwargs" => OrderedDict("prefix" => "nested"),
+        );
+        type_key,
+        base_module,
+    )
+    @test nested.prefix == "nested"
+    @test only(nested.values["children"]) == TaggedConfigLeaf(; x = 2)
+
+    # Explicit construction also works when the caller supplies the target type instead of
+    # putting a type tag in the data.
+    known_type = PortableStructs.from_dict(
+        ExplicitConstruction,
+        OrderedDict(
+            "args" => Any[10, tagged_leaf],
+            "kwargs" => OrderedDict("label" => "known type"),
+        );
+        type_key,
+        base_module,
+    )
+    @test known_type.number == 10
+    @test known_type.child == TaggedConfigLeaf(; x = 2)
+    @test known_type.label == "known type"
+
+    # The format-specific loaders expose the same default and configurable argument keys.
+    yaml_value = load_from_yaml("explicit_constructor.yaml"; base_module)
+    @test yaml_value.number == 11
+    @test yaml_value.child == TaggedConfigLeaf(; x = 4)
+    @test yaml_value.label == "YAML"
+
+    json_value = load_from_json(
+        "explicit_constructor.json";
+        args_key = "arguments",
+        kwargs_key = "keywords",
+        base_module,
+    )
+    @test json_value.number == 12
+    @test json_value.child == TaggedConfigLeaf(; x = 5)
+    @test json_value.label == "JSON"
+
+    # Explicit calls reject malformed or ambiguous call descriptions with focused errors.
+    @test_throws "must be a sequence" PortableStructs.from_dict(
+        Any,
+        OrderedDict(type_key => "Core.tuple", "args" => 1);
+        type_key,
+        base_module,
+    )
+    @test_throws "must be a mapping" PortableStructs.from_dict(
+        Any,
+        OrderedDict(type_key => "TaggedConfigLeaf", "kwargs" => Any["x", 1]);
+        type_key,
+        base_module,
+    )
+    @test_throws "may only contain" PortableStructs.from_dict(
+        Any,
+        OrderedDict(
+            type_key => "Core.tuple",
+            "args" => Any[1, 2],
+            "extra" => true,
+        );
+        type_key,
+        base_module,
+    )
+    @test_throws "must be distinct" PortableStructs.from_dict(
+        Any,
+        OrderedDict(type_key => "Core.tuple", "args" => Any[1, 2]);
+        type_key,
+        args_key = type_key,
+        base_module,
+    )
 
 end
 

@@ -1,0 +1,13 @@
+{
+    "type": "ExplicitConstruction",
+    "arguments": [
+        12,
+        {
+            "type": "TaggedConfigLeaf",
+            "x": 5
+        }
+    ],
+    "keywords": {
+        "label": "JSON"
+    }
+}

@@ -39,6 +39,8 @@ This package is meant to be simple, and that simplicity comes from several const
 * The type of each struct will show up in the YAML file with a key called "type" (or
   whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and
   `load_from_yaml`). Hence no struct is allowed have a field with this name.
+* Typed mappings can explicitly invoke positional and keyword constructors through the
+  configurable "args" and "kwargs" keys.
 * This isn't meant to be fast or efficient.
 
 There is overlap with the functionality in StructTypes. This package is not as flexible as
@@ -114,11 +116,41 @@ function from_dict(t::Type{T}, v::V; kwargs...) where {T, V <: T}
     return v
 end
 
-# If the type is actually a function, load all children as keyword arguments and then run
-# the function.
-function from_dict(f::Function, v; kwargs...)
-    children = constructor_arguments(f, v; kwargs...)
+# If the type is actually a function, load its arguments and then run the function.
+function from_dict(
+    f::Function,
+    v;
+    type_key = "type",
+    base_module = Main,
+    args_key = "args",
+    kwargs_key = "kwargs",
+    kwargs...,
+)
+
+    validate_constructor_call_keys(type_key, args_key, kwargs_key)
+    if v isa AbstractDict && explicit_constructor_call(v; args_key, kwargs_key)
+        return construct_explicitly(
+            f,
+            v;
+            type_key,
+            base_module,
+            args_key,
+            kwargs_key,
+            kwargs...,
+        )
+    end
+
+    children = constructor_arguments(
+        f,
+        v;
+        type_key,
+        base_module,
+        args_key,
+        kwargs_key,
+        kwargs...,
+    )
     return f(; children...)
+
 end
 
 # Numbers
@@ -418,13 +450,14 @@ end
 # annotations, each field type tells us how to decode that raw parsed value. This is what
 # lets a vector field apply conversion to each element, or an abstract field receive a
 # tagged concrete value.
-function constructor_arguments(type::Type, dict; type_key, base_module)
+function constructor_arguments(type::Type, dict; type_key, base_module, kwargs...)
     return NamedTuple(
         Symbol(k) => from_dict(
             hasfield(type, Symbol(k)) ? fieldtype(type, Symbol(k)) : Any,
             v;
             type_key,
             base_module,
+            kwargs...,
         )
         for (k, v) in pairs(dict) if k != type_key
     )
@@ -433,11 +466,109 @@ end
 # When the tag names a function, we do not have field annotations to guide conversion, so
 # children are decoded as `Any`. This preserves current behavior, but it is also the part
 # users should treat as trusted-input-only: constructing via a function means running code.
-function constructor_arguments(::Function, dict; type_key, base_module)
+function constructor_arguments(::Function, dict; type_key, base_module, kwargs...)
     return NamedTuple(
-        Symbol(k) => from_dict(Any, v; type_key, base_module)
+        Symbol(k) => from_dict(Any, v; type_key, base_module, kwargs...)
         for (k, v) in pairs(dict) if k != type_key
     )
+end
+
+function validate_constructor_call_keys(type_key, args_key, kwargs_key)
+    constructor_keys = (type_key, args_key, kwargs_key)
+    length(unique(constructor_keys)) == length(constructor_keys) || throw(ArgumentError(
+        "The type, args, and kwargs keys must be distinct, but received " *
+        "$constructor_keys.",
+    ))
+    return nothing
+end
+
+function explicit_constructor_call(dict::AbstractDict; args_key, kwargs_key)
+    return haskey(dict, args_key) || haskey(dict, kwargs_key)
+end
+
+function decode_untyped_argument(v::AbstractVector; kwargs...)
+    return [decode_untyped_argument(el; kwargs...) for el in v]
+end
+function decode_untyped_argument(
+    v::AbstractDict;
+    type_key,
+    kwargs...,
+)
+
+    # A tagged mapping needs the normal loader to resolve and construct its target. An
+    # ordinary mapping remains a mapping, but its values still recurse through this helper.
+    if haskey(v, type_key)
+        return from_dict(Any, v; type_key, kwargs...)
+    else
+        return OrderedDict(
+            key => decode_untyped_argument(value; type_key, kwargs...)
+            for (key, value) in pairs(v)
+        )
+    end
+
+end
+function decode_untyped_argument(v; kwargs...)
+    return from_dict(Any, v; kwargs...)
+end
+
+function explicit_constructor_arguments(
+    dict::AbstractDict;
+    type_key,
+    base_module,
+    args_key,
+    kwargs_key,
+    kwargs...,
+)
+
+    # Explicit calls have a closed shape so misspelled or ambiguous arguments cannot be
+    # silently ignored.
+    unexpected_keys = setdiff(keys(dict), (args_key, kwargs_key))
+    isempty(unexpected_keys) || throw(ArgumentError(
+        "Explicit constructor calls may only contain the '$args_key' and " *
+        "'$kwargs_key' keys, but also received $(collect(unexpected_keys)).",
+    ))
+
+    # Preserve the order of positional arguments while decoding their contents.
+    raw_args = get(dict, args_key, Any[])
+    raw_args isa AbstractVector || throw(ArgumentError(
+        "The '$args_key' value for an explicit constructor call must be a sequence.",
+    ))
+    args = Tuple(
+        decode_untyped_argument(
+            value;
+            type_key,
+            base_module,
+            args_key,
+            kwargs_key,
+            kwargs...,
+        )
+        for value in raw_args
+    )
+
+    # Keyword names come from mapping keys, while their values follow the same recursive
+    # decoding path as positional arguments.
+    raw_kwargs = get(dict, kwargs_key, OrderedDict{String, Any}())
+    raw_kwargs isa AbstractDict || throw(ArgumentError(
+        "The '$kwargs_key' value for an explicit constructor call must be a mapping.",
+    ))
+    keyword_arguments = NamedTuple(
+        Symbol(key) => decode_untyped_argument(
+            value;
+            type_key,
+            base_module,
+            args_key,
+            kwargs_key,
+            kwargs...,
+        )
+        for (key, value) in pairs(raw_kwargs)
+    )
+
+    return args, keyword_arguments
+
+end
+function construct_explicitly(target, dict::AbstractDict; kwargs...)
+    args, keyword_arguments = explicit_constructor_arguments(dict; kwargs...)
+    return target(args...; keyword_arguments...)
 end
 
 function keys_matching_fieldnames(type::Type, dict; type_key)
@@ -474,7 +605,13 @@ function keys_matching_fieldnames(type::Type, dict; type_key)
 
 end
 
-function positional_constructor_arguments(type::Type, dict; type_key, base_module)
+function positional_constructor_arguments(
+    type::Type,
+    dict;
+    type_key,
+    base_module,
+    kwargs...,
+)
 
     field_keys = keys_matching_fieldnames(type, dict; type_key)
     if isnothing(field_keys)
@@ -483,7 +620,13 @@ function positional_constructor_arguments(type::Type, dict; type_key, base_modul
 
     field_names = fieldnames(type)
     args = Tuple(
-        from_dict(fieldtype(type, field_name), dict[key]; type_key, base_module)
+        from_dict(
+            fieldtype(type, field_name),
+            dict[key];
+            type_key,
+            base_module,
+            kwargs...,
+        )
         for (field_name, key) in zip(field_names, field_keys)
     )
     arg_types = Tuple{map(typeof, args)...}
@@ -517,7 +660,17 @@ end
 # and let the resolved type or function drive construction. If there's no type key, we will
 # try keyword construction first, then positional construction when the type's field layout
 # lines up exactly with the dictionary.
-function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs...) where {T}
+function from_dict(
+    ::Type{T},
+    dict::AbstractDict;
+    type_key,
+    base_module,
+    args_key = "args",
+    kwargs_key = "kwargs",
+    kwargs...,
+) where {T}
+
+    validate_constructor_call_keys(type_key, args_key, kwargs_key)
 
     if haskey(dict, type_key)
 
@@ -528,8 +681,46 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         new_dict_without_type_key = typeof(dict)(
             key => value for (key, value) in dict if key != type_key
         )
-        value = from_dict(target, new_dict_without_type_key; type_key, base_module)
+        value = if explicit_constructor_call(
+            new_dict_without_type_key;
+            args_key,
+            kwargs_key,
+        )
+            construct_explicitly(
+                target,
+                new_dict_without_type_key;
+                type_key,
+                base_module,
+                args_key,
+                kwargs_key,
+                kwargs...,
+            )
+        else
+            from_dict(
+                target,
+                new_dict_without_type_key;
+                type_key,
+                base_module,
+                args_key,
+                kwargs_key,
+                kwargs...,
+            )
+        end
         return finish_decoded_value(T, value)
+
+    elseif T !== Any && explicit_constructor_call(dict; args_key, kwargs_key)
+
+        # When the caller already specified the target type, the input does not also need a
+        # type tag to request explicit construction.
+        return construct_explicitly(
+            T,
+            dict;
+            type_key,
+            base_module,
+            args_key,
+            kwargs_key,
+            kwargs...,
+        )
 
     elseif OrderedDict <: T
 
@@ -539,7 +730,15 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         # what we should load this as, but we *did* load as a dict already, so we can make
         # an ordered dict of it. We just need to continue processing the children.
         return OrderedDict(
-            k => from_dict(Any, v; type_key, base_module)
+            k => from_dict(
+                Any,
+                v;
+                type_key,
+                base_module,
+                args_key,
+                kwargs_key,
+                kwargs...,
+            )
             for (k, v) in pairs(dict) if k != type_key
         )
 
@@ -549,7 +748,15 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         # that there's a keyword constructor for whatever it is we're looking to construct.
         # Let's use that. We'll convert the dict with children to a named tuple and then
         # splat that into the constructor.
-        children = constructor_arguments(T, dict; type_key, base_module)
+        children = constructor_arguments(
+            T,
+            dict;
+            type_key,
+            base_module,
+            args_key,
+            kwargs_key,
+            kwargs...,
+        )
         return T(; children...)
 
     else
@@ -559,7 +766,15 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         # that accepts the decoded arguments. Values are decoded in field order so the input
         # mapping order does not affect construction. This also covers parametric types with
         # known field layouts, such as UnitRange.
-        args = positional_constructor_arguments(T, dict; type_key, base_module)
+        args = positional_constructor_arguments(
+            T,
+            dict;
+            type_key,
+            base_module,
+            args_key,
+            kwargs_key,
+            kwargs...,
+        )
         if !isnothing(args)
             return T(args...)
         end
@@ -774,6 +989,10 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the YAML is used to say which type should be used
   in construction. Default: "type".
+* `args_key`: Determines what field requests explicit positional arguments. Default:
+  "args".
+* `kwargs_key`: Determines what field requests explicit keyword arguments. Default:
+  "kwargs".
 * `base_module`: The module to search for types called out in the YAML file. Default: Main
 * `include_key`: Determines what field in the YAML is used to include another YAML file.
   Default: "include".
@@ -821,6 +1040,10 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the JSON is used to say which type should be used
   in construction. Default: "type".
+* `args_key`: Determines what field requests explicit positional arguments. Default:
+  "args".
+* `kwargs_key`: Determines what field requests explicit keyword arguments. Default:
+  "kwargs".
 * `base_module`: The module to search for types called out in the JSON file. Default: Main
 * `include_key`: Determines what field in the JSON is used to include another JSON file.
   Default: "include".

@@ -1,0 +1,7 @@
+type: ExplicitConstruction
+args:
+  - 11
+  - type: TaggedConfigLeaf
+    x: 4
+kwargs:
+  label: YAML

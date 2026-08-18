@@ -1,5 +1,13 @@
 # PortableStructs.jl Change Log
 
+## Unreleased
+
+### Breaking
+
+* Allow users to specify the `args` and `kwargs` for the constructor/function indicated by `type`.
+
+### Non-Breaking
+
 ## v1.3.0
 
 * Added support for construction from non-conrete types, like `UnitRange` (instead of `UnitRange{Int64}`).
