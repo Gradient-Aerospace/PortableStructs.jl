@@ -1,5 +1,9 @@
 # PortableStructs.jl Change Log
 
+## Unreleased
+
+* Added `from_dict` to load Tuple from a vector in an "args" key.
+
 ## v1.3.0
 
 * Added support for construction from non-conrete types, like `UnitRange` (instead of `UnitRange{Int64}`).
