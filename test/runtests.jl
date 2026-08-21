@@ -622,6 +622,62 @@ end
     @test tuple[2] isa TaggedConfigLeaf
     @test tuple[2].x == 2
 
+    # A tagged dictionary can identify a tuple inside a field whose declared type provides
+    # no more information than `Any`. Its args use the same recursively decoded vector path
+    # tested above.
+    tagged_tuple = PortableStructs.from_dict(
+        Any,
+        OrderedDict(
+            type_key => "Tuple",
+            "args" => Any[1, tagged_leaf],
+        );
+        type_key,
+        base_module,
+    )
+    @test tagged_tuple[1] == 1
+    @test tagged_tuple[2] isa TaggedConfigLeaf
+    @test tagged_tuple[2].x == 2
+
+    # The same representation works when the caller already knows that the target is a
+    # Tuple, in which case no type tag is necessary.
+    known_tuple = PortableStructs.from_dict(
+        Tuple,
+        OrderedDict("args" => Any[3, "four"]);
+        type_key,
+        base_module,
+    )
+    @test known_tuple == (3, "four")
+
+    # Exercise the format-specific YAML loader rather than only testing its decoded
+    # dictionary representation.
+    @test load_from_yaml("tuple.yaml"; base_module) == (1024, 768)
+
+    # Malformed tuple dictionaries produce errors specific to this representation.
+    @test_throws "\"args\" key was missing" PortableStructs.from_dict(
+        Tuple,
+        OrderedDict{String, Any}();
+        type_key,
+        base_module,
+    )
+    @test_throws "must be a sequence" PortableStructs.from_dict(
+        Tuple,
+        OrderedDict("args" => 1);
+        type_key,
+        base_module,
+    )
+    @test_throws "may only contain" PortableStructs.from_dict(
+        Tuple,
+        OrderedDict("args" => Any[1, 2], "extra" => true);
+        type_key,
+        base_module,
+    )
+    @test_throws "Could not construct a Tuple" PortableStructs.from_dict(
+        Tuple,
+        OrderedDict(type_key => "NamedTuple", "args" => Any[1, 2]);
+        type_key,
+        base_module,
+    )
+
     # A fully typed tuple should reject the wrong number of elements instead of silently
     # truncating through `zip(fieldtypes(T), v)`.
     @test_throws AssertionError PortableStructs.from_dict(

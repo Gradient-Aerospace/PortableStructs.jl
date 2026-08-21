@@ -83,6 +83,22 @@ MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
 
 The `type` can be a type or a function to call with keyword arguments.
 
+## Tuples in Untyped Fields
+
+YAML and JSON sequences normally load as vectors when the containing field does not provide
+a more specific type. A dictionary can explicitly identify a tuple and provide its values
+under `args`:
+
+```yaml
+size:
+  type: Tuple
+  args: [1024, 768]
+```
+
+Each entry under `args` is recursively decoded, so it can also contain tagged values. This
+representation is intended for hand-authored inputs; ordinary tuple serialization remains a
+plain sequence.
+
 ## JSON Example
 
 The same dictionary representation from above can be written to JSON. The JSON methods are available once `JSON` is loaded:
