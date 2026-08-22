@@ -734,11 +734,15 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
     if payload isa AbstractDict
 
         # Let any other keys in the dictionary overwrite what we loaded. (The file *doing*
-        # the including can overwrite anything that it includes.)
-        payload = OrderedDict(
-            k => haskey(d, k) ? d[k] : payload[k]
-            for k in union(keys(payload), keys(d)) if k != include_key
-        )
+        # the including can overwrite anything that it includes.) Existing keys retain
+        # their positions, while new keys are appended in the including file's order.
+        merged_payload = OrderedDict(payload)
+        for (key, value) in pairs(d)
+            if key != include_key
+                merged_payload[key] = value
+            end
+        end
+        payload = merged_payload
 
     end
 

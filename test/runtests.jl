@@ -926,6 +926,16 @@ end
     @test vector_includes["items"][1]["name"] == "expanded"
     @test !haskey(vector_includes["items"][1], "include")
 
+    # Included keys retain the source file's order. Overrides stay in the original key's
+    # position, and keys introduced by the including file are appended in their own order.
+    expected_key_order = ["first", "second", "third", "fourth", "fifth"]
+    yaml_include_order = PortableStructs.load_yaml_dict("include_order/nested.yaml")
+    json_include_order = PortableStructs.load_json_dict("include_order/nested.json")
+    @test collect(keys(yaml_include_order)) == expected_key_order
+    @test collect(keys(json_include_order)) == expected_key_order
+    @test collect(values(yaml_include_order)) == [10, 20, 3, 4, 5]
+    @test collect(values(json_include_order)) == [10, 20, 3, 4, 5]
+
 end
 
 @testset "exceptions" begin
