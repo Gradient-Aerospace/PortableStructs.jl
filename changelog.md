@@ -3,6 +3,7 @@
 ## Unreleased
 
 * Added `from_dict` to load Tuple from a vector in an "args" key.
+* Clarified error when general construction of the target type fails.
 
 ## v1.3.0
 
