@@ -95,6 +95,8 @@ The keyword arguments come directly from the format-specific load functions, suc
 """
 function from_dict end
 
+include("diagnostics.jl")
+
 # The decoding path is intentionally split into a few small stages:
 #
 # 1. YAML/JSON gives us ordinary Julia containers and scalars.
@@ -116,9 +118,16 @@ end
 
 # If the type is actually a function, load all children as keyword arguments and then run
 # the function.
-function from_dict(f::Function, v; kwargs...)
-    children = constructor_arguments(f, v; kwargs...)
-    return f(; children...)
+function from_dict(
+    f::Function,
+    v;
+    _context = FromDictContext(),
+    kwargs...,
+)
+    children = constructor_arguments(f, v; _context, kwargs...)
+    return contextualize(f, v, _context) do
+        f(; children...)
+    end
 end
 
 # Numbers
@@ -127,7 +136,7 @@ end
 function from_dict(::Type{T}, v::AbstractFloat; kwargs...) where {T <: AbstractFloat}
     return convert(T, v)
 end
-function from_dict(::Type{T}, v::Int, kwargs...) where {T <: Int}
+function from_dict(::Type{T}, v::Int; kwargs...) where {T <: Int}
     return convert(T, v)
 end
 
@@ -228,27 +237,42 @@ end
 
 # # If we're loading up a vector, from_dict each element individually.
 function from_dict(t::Type{<:Vector}, v::Vector; kwargs...)
-    return [from_dict(eltype(t), el; kwargs...) for el in v]
+    return [
+        decode_child(eltype(t), element, index; kwargs...)
+        for (index, element) in enumerate(v)
+    ]
 end
 
 # NTuples are like vectors; from_dict each element individually inside a tuple.
 function from_dict(::Type{NTuple{N, ET}}, v::Vector; kwargs...) where {N, ET}
-    return Tuple(from_dict(ET, el; kwargs...) for el in v)
+    return Tuple(
+        decode_child(ET, element, index; kwargs...)
+        for (index, element) in enumerate(v)
+    )
 end
 function from_dict(t::Type{<:NTuple}, v::Vector; kwargs...) # Length is unknown
-    els = [from_dict(eltype(t), el; kwargs...) for el in v]
+    els = [
+        decode_child(eltype(t), element, index; kwargs...)
+        for (index, element) in enumerate(v)
+    ]
     return NTuple{length(els), eltype(t)}(els)
 end
 
 # Tuples (that aren't NTuples) involve from_dicting each element from its individual type.
 function from_dict(::Type{T}, v::Vector; kwargs...) where {T <: Tuple}
     @assert fieldcount(T) == length(v) "Could not construct $T from the fields in the provided value; the following fields were missing: $(setdiff(fieldnames(T), keys(v)))"
-    return Tuple(from_dict(ft, el; kwargs...) for (ft, el) in zip(fieldtypes(T), v))
+    return Tuple(
+        decode_child(field_type, element, index; kwargs...)
+        for (index, (field_type, element)) in enumerate(zip(fieldtypes(T), v))
+    )
 end
 
 # Tuples without known types will build from Any for each element.
 function from_dict(::Type{Tuple}, v::Vector; kwargs...)
-    return Tuple(from_dict(Any, el; kwargs...) for el in v)
+    return Tuple(
+        decode_child(Any, element, index; kwargs...)
+        for (index, element) in enumerate(v)
+    )
 end
 
 # A dictionary representation allows an untyped field to identify itself as a tuple. This
@@ -285,25 +309,39 @@ function from_dict(
     args isa Vector || throw(ArgumentError(
         "Could not construct a Tuple because \"args\" must be a sequence.",
     ))
-    return from_dict(Tuple, args; type_key, base_module, kwargs...)
+    return decode_child(Tuple, args, "args"; type_key, base_module, kwargs...)
 
 end
 
 # Named Tuples
 
 # If we seek a fully characterized named tuple but have a dict, let the keys be the names.
-function from_dict(::Type{NamedTuple{F, T}}, v::AbstractDict{<:AbstractString, <:Any}; kwargs...) where {F, T}
+function from_dict(
+    ::Type{NamedTuple{F, T}},
+    v::AbstractDict{<:AbstractString, <:Any};
+    kwargs...,
+) where {F, T}
     return NamedTuple(
-        fn => from_dict(ft, v[string(fn)]; kwargs...)
-        for (fn, ft) in zip(F, fieldtypes(T))
+        field_name => decode_child(
+            field_type,
+            v[string(field_name)],
+            string(field_name);
+            kwargs...,
+        )
+        for (field_name, field_type) in zip(F, fieldtypes(T))
     )
 end
 
 # If we seek a generic named tuple but have a dict, let the keys be the names.
-function from_dict(::Type{NamedTuple}, v::AbstractDict{<:AbstractString, <:Any}; type_key, kwargs...)
+function from_dict(
+    ::Type{NamedTuple},
+    v::AbstractDict{<:AbstractString, <:Any};
+    type_key,
+    kwargs...,
+)
     return NamedTuple(
-        Symbol(key) => from_dict(Any, el; type_key, kwargs...)
-        for (key, el) in pairs(v) if key != type_key
+        Symbol(key) => decode_child(Any, element, key; type_key, kwargs...)
+        for (key, element) in pairs(v) if key != type_key
     )
 end
 
@@ -311,39 +349,64 @@ end
 # Dicts
 
 # If the eltype of the dict is known, we can use that.
-function from_dict(t::Type{Dict{KT, VT}}, v::AbstractDict; type_key, kwargs...) where {KT <: AbstractString, VT}
+function from_dict(
+    t::Type{Dict{KT, VT}},
+    v::AbstractDict;
+    type_key,
+    kwargs...,
+) where {KT <: AbstractString, VT}
     return Dict{KT, VT}(
-        KT(key) => from_dict(VT, el; type_key, kwargs...) # Need to make the key have the right type.
-        for (key, el) in pairs(v) if key != type_key
+        KT(key) => decode_child(VT, element, key; type_key, kwargs...)
+        for (key, element) in pairs(v) if key != type_key
     )
 end
-function from_dict(t::Type{OrderedDict{KT, VT}}, v::AbstractDict; type_key, kwargs...) where {KT <: AbstractString, VT}
+function from_dict(
+    t::Type{OrderedDict{KT, VT}},
+    v::AbstractDict;
+    type_key,
+    kwargs...,
+) where {KT <: AbstractString, VT}
     return OrderedDict{KT, VT}(
-        KT(key) => from_dict(VT, el; type_key, kwargs...) # Need to make the key have the right type.
-        for (key, el) in pairs(v) if key != type_key
+        KT(key) => decode_child(VT, element, key; type_key, kwargs...)
+        for (key, element) in pairs(v) if key != type_key
     )
 end
 
 # If the eltype of the dict isn't known...
-function from_dict(t::Type{T}, v::AbstractDict; type_key, kwargs...) where {T <: Union{Dict, OrderedDict}}
+function from_dict(
+    t::Type{T},
+    v::AbstractDict;
+    type_key,
+    kwargs...,
+) where {T <: Union{Dict, OrderedDict}}
     return T( # Infer the key and value types since those weren't provided.
-        key => from_dict(Any, el; type_key, kwargs...)
-        for (key, el) in pairs(v) if key != type_key
+        key => decode_child(Any, element, key; type_key, kwargs...)
+        for (key, element) in pairs(v) if key != type_key
     )
 end
 
 # If we're literally asking for the abstraction, then we can return anything satisfying the
 # abstraction, so let's choose OrderedDict.
-function from_dict(t::Type{AbstractDict}, v::AbstractDict; type_key, kwargs...)
+function from_dict(
+    t::Type{AbstractDict},
+    v::AbstractDict;
+    type_key,
+    kwargs...,
+)
     return OrderedDict(
-        key => from_dict(Any, el; type_key, kwargs...)
-        for (key, el) in pairs(v) if key != type_key
+        key => decode_child(Any, element, key; type_key, kwargs...)
+        for (key, element) in pairs(v) if key != type_key
     )
 end
-function from_dict(t::Type{AbstractDict{S, T}}, v::AbstractDict; type_key, kwargs...) where {S, T}
+function from_dict(
+    t::Type{AbstractDict{S, T}},
+    v::AbstractDict;
+    type_key,
+    kwargs...,
+) where {S, T}
     return OrderedDict{S, T}(
-        S(key) => from_dict(T, el; type_key, kwargs...)
-        for (key, el) in pairs(v) if key != type_key
+        S(key) => decode_child(T, element, key; type_key, kwargs...)
+        for (key, element) in pairs(v) if key != type_key
     )
 end
 
@@ -456,25 +519,46 @@ end
 # annotations, each field type tells us how to decode that raw parsed value. This is what
 # lets a vector field apply conversion to each element, or an abstract field receive a
 # tagged concrete value.
-function constructor_arguments(type::Type, dict; type_key, base_module)
+function constructor_arguments(
+    type::Type,
+    dict;
+    type_key,
+    base_module,
+    kwargs...,
+)
     return NamedTuple(
-        Symbol(k) => from_dict(
-            hasfield(type, Symbol(k)) ? fieldtype(type, Symbol(k)) : Any,
-            v;
+        Symbol(key) => decode_child(
+            hasfield(type, Symbol(key)) ? fieldtype(type, Symbol(key)) : Any,
+            value,
+            key;
             type_key,
             base_module,
+            kwargs...,
         )
-        for (k, v) in pairs(dict) if k != type_key
+        for (key, value) in pairs(dict) if key != type_key
     )
 end
 
 # When the tag names a function, we do not have field annotations to guide conversion, so
 # children are decoded as `Any`. This preserves current behavior, but it is also the part
 # users should treat as trusted-input-only: constructing via a function means running code.
-function constructor_arguments(::Function, dict; type_key, base_module)
+function constructor_arguments(
+    ::Function,
+    dict;
+    type_key,
+    base_module,
+    kwargs...,
+)
     return NamedTuple(
-        Symbol(k) => from_dict(Any, v; type_key, base_module)
-        for (k, v) in pairs(dict) if k != type_key
+        Symbol(key) => decode_child(
+            Any,
+            value,
+            key;
+            type_key,
+            base_module,
+            kwargs...,
+        )
+        for (key, value) in pairs(dict) if key != type_key
     )
 end
 
@@ -512,7 +596,13 @@ function keys_matching_fieldnames(type::Type, dict; type_key)
 
 end
 
-function positional_constructor_arguments(type::Type, dict; type_key, base_module)
+function positional_constructor_arguments(
+    type::Type,
+    dict;
+    type_key,
+    base_module,
+    _context = FromDictContext(),
+)
 
     field_keys = keys_matching_fieldnames(type, dict; type_key)
     if isnothing(field_keys)
@@ -521,7 +611,14 @@ function positional_constructor_arguments(type::Type, dict; type_key, base_modul
 
     field_names = fieldnames(type)
     args = Tuple(
-        from_dict(fieldtype(type, field_name), dict[key]; type_key, base_module)
+        decode_child(
+            fieldtype(type, field_name),
+            dict[key],
+            key;
+            _context,
+            type_key,
+            base_module,
+        )
         for (field_name, key) in zip(field_names, field_keys)
     )
     arg_types = Tuple{map(typeof, args)...}
@@ -529,13 +626,18 @@ function positional_constructor_arguments(type::Type, dict; type_key, base_modul
         return args
     end
 
-    error(
+    reason =
         """
-        Could not construct a $type from the given dictionary.
-
         The dictionary keys match the fields $field_names.
         No positional constructor accepts the decoded argument types $arg_types.
         """
+    throw(
+        FromDictError(
+            _context,
+            type,
+            dict;
+            reason,
+        ),
     )
 
 end
@@ -555,19 +657,39 @@ end
 # and let the resolved type or function drive construction. If there's no type key, we will
 # try keyword construction first, then positional construction when the type's field layout
 # lines up exactly with the dictionary.
-function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs...) where {T}
+function from_dict(
+    ::Type{T},
+    dict::AbstractDict;
+    type_key,
+    base_module,
+    _context = FromDictContext(),
+    kwargs...,
+) where {T}
 
     if haskey(dict, type_key)
 
         # There's a key that should tell us what to construct. We'll rely on `from_dict`
         # for this, so that may result in one of the specialized `from_dict` methods. If
         # not, we'll end up back here, but there won't be a type key to use any longer.
-        target = resolve_constructor_tag(dict; type_key, base_module)
+        type_tag = dict[type_key]
+        unresolved_context = tagged_context(_context, T, type_tag, nothing)
+        target = contextualize(T, dict, unresolved_context) do
+            resolve_constructor_tag(dict; type_key, base_module)
+        end
+        resolved_context = tagged_context(_context, T, type_tag, target)
         new_dict_without_type_key = typeof(dict)(
             key => value for (key, value) in dict if key != type_key
         )
-        value = from_dict(target, new_dict_without_type_key; type_key, base_module)
-        return finish_decoded_value(T, value)
+        value = decode_value(
+            target,
+            new_dict_without_type_key;
+            _context = resolved_context,
+            type_key,
+            base_module,
+        )
+        return contextualize(T, dict, resolved_context) do
+            finish_decoded_value(T, value)
+        end
 
     elseif OrderedDict <: T
 
@@ -577,8 +699,15 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         # what we should load this as, but we *did* load as a dict already, so we can make
         # an ordered dict of it. We just need to continue processing the children.
         return OrderedDict(
-            k => from_dict(Any, v; type_key, base_module)
-            for (k, v) in pairs(dict) if k != type_key
+            key => decode_child(
+                Any,
+                value,
+                key;
+                _context,
+                type_key,
+                base_module,
+            )
+            for (key, value) in pairs(dict) if key != type_key
         )
 
     elseif hasmethod(T, Tuple{}, Tuple(Symbol(k) for k in keys(dict)))
@@ -587,8 +716,10 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         # that there's a keyword constructor for whatever it is we're looking to construct.
         # Let's use that. We'll convert the dict with children to a named tuple and then
         # splat that into the constructor.
-        children = constructor_arguments(T, dict; type_key, base_module)
-        return T(; children...)
+        children = constructor_arguments(T, dict; type_key, base_module, _context)
+        return contextualize(T, dict, _context) do
+            T(; children...)
+        end
 
     else
 
@@ -597,21 +728,23 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
         # that accepts the decoded arguments. Values are decoded in field order so the input
         # mapping order does not affect construction. This also covers parametric types with
         # known field layouts, such as UnitRange.
-        args = positional_constructor_arguments(T, dict; type_key, base_module)
+        args = positional_constructor_arguments(T, dict; type_key, base_module, _context)
         if !isnothing(args)
-            return T(args...)
+            return contextualize(T, dict, _context) do
+                T(args...)
+            end
         end
 
     end
 
-    error(
-        """
-        Could not construct a $T from the given dictionary:
-
-        $(dict)
-
-        Adding a \"$type_key\" key would help resolve which type to construct.
-        """
+    reason = dictionary_construction_failure(T, dict; type_key, context = _context)
+    throw(
+        FromDictError(
+            _context,
+            T,
+            dict;
+            reason,
+        ),
     )
 
 end

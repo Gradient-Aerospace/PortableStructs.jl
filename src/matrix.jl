@@ -44,7 +44,7 @@ function matrix_from_rows(::Type{T}, rows; kwargs...) where {T}
     ncols = matrix_column_count(rows)
     matrix = Matrix{T}(undef, length(rows), ncols)
     for i in eachindex(rows), j in 1:ncols
-        matrix[i, j] = from_dict(T, rows[i][j]; kwargs...)
+        matrix[i, j] = decode_child(T, rows[i][j], "rows", i, j; kwargs...)
     end
     return matrix
 
@@ -53,7 +53,7 @@ end
 function inferred_matrix_from_rows(rows; kwargs...)
     ncols = matrix_column_count(rows)
     return [
-        from_dict(Any, rows[i][j]; kwargs...)
+        decode_child(Any, rows[i][j], "rows", i, j; kwargs...)
         for i in eachindex(rows), j in 1:ncols
     ]
 end
@@ -93,7 +93,13 @@ function from_dict(
 
 end
 
-function from_dict(::Type{Matrix}, dict::AbstractDict; type_key, base_module, kwargs...)
+function from_dict(
+    ::Type{Matrix},
+    dict::AbstractDict;
+    type_key,
+    base_module,
+    kwargs...,
+)
     validate_matrix_type(dict; type_key, base_module)
     return inferred_matrix_from_rows(
         matrix_rows(dict);

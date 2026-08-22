@@ -172,6 +172,10 @@ end
     x::Int
 end
 
+@kwdef struct DiagnosticContainer
+    values::Vector{TaggedConfigLeaf}
+end
+
 # This intentionally has no constructor. It pins down that PortableStructs only chooses a
 # concrete implementation for `AbstractDict` itself, not for arbitrary abstract subtypes.
 abstract type MyAbstractDict{K, V} <: AbstractDict{K, V} end
@@ -841,6 +845,71 @@ end
 
 end
 
+@testset "from_dict diagnostics" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+
+    # Format-specific loaders attach the source file, while each recursive container adds
+    # its key or one-based index. The original parse error remains available as the cause.
+    nested_error = try
+        load_from_yaml("diagnostic_error.yaml"; base_module)
+        nothing
+    catch exception
+        exception
+    end
+    @test nested_error isa PortableStructs.FromDictError
+    nested_message = sprint(showerror, nested_error)
+    @test occursin("Source: diagnostic_error.yaml", nested_message)
+    @test occursin("Path: values[1]/x", nested_message)
+    @test nested_error.cause isa ArgumentError
+    @test !isnothing(nested_error.cause_backtrace)
+
+    # A tagged value retains both its declared type and resolved construction target. When
+    # construction itself is impossible, report key differences instead of suggesting a
+    # type tag that was already present.
+    tagged_error = try
+        PortableStructs.from_dict(
+            TaggedConfig,
+            OrderedDict(
+                type_key => "TaggedConfigLeaf",
+                "wrong" => 1,
+            );
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test tagged_error isa PortableStructs.FromDictError
+    tagged_message = sprint(showerror, tagged_error)
+    @test occursin(
+        "Type tag: \"TaggedConfigLeaf\" resolved to TaggedConfigLeaf",
+        tagged_message,
+    )
+    @test occursin("Expected fields: (:x,)", tagged_message)
+    @test occursin("Missing fields: [:x]", tagged_message)
+    @test occursin("Unexpected fields: [:wrong]", tagged_message)
+    @test !occursin("may be required here", tagged_message)
+
+    # The type-tag hint remains useful when an untagged abstract type truly is ambiguous.
+    abstract_error = try
+        PortableStructs.from_dict(
+            MyAbstractDict{String, Int},
+            OrderedDict("a" => "1");
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test abstract_error isa PortableStructs.FromDictError
+    @test occursin("may be required here", sprint(showerror, abstract_error))
+
+end
+
 @testset "tagged and dict-backed scalar loading" begin
 
     type_key = "type"
@@ -858,12 +927,19 @@ end
 
     # The final requested type check should reject a valid tag that resolves to the wrong
     # branch of the type hierarchy.
-    @test_throws MethodError PortableStructs.from_dict(
-        OtherTaggedConfig,
-        tagged_leaf;
-        type_key,
-        base_module,
-    )
+    incompatible_error = try
+        PortableStructs.from_dict(
+            OtherTaggedConfig,
+            tagged_leaf;
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test incompatible_error isa PortableStructs.FromDictError
+    @test incompatible_error.cause isa MethodError
 
     # Rational values can be represented as field dictionaries, both when the element type is
     # known and when it should be inferred by Julia's Rational constructor.

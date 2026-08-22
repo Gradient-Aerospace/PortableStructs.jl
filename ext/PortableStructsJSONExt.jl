@@ -29,7 +29,8 @@ function PortableStructs.load_from_json(
     include_key = "include",
 )
     dict = PortableStructs.load_json_dict(filename; include_key)
-    return PortableStructs.from_dict(t, dict; type_key, base_module)
+    context = PortableStructs.FromDictContext(; source = String(filename))
+    return PortableStructs.decode_value(t, dict; _context = context, type_key, base_module)
 end
 
 function PortableStructs.load_from_json(filename::AbstractString; kwargs...)

@@ -1,0 +1,4 @@
+type: DiagnosticContainer
+values:
+  - type: TaggedConfigLeaf
+    x: not_an_integer
