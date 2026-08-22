@@ -3,6 +3,7 @@
 ## Unreleased
 
 * Added `from_dict` to load Tuple from a vector in an "args" key.
+* Fixed a bug where keys did not preserve their order through an `include`.
 
 ## v1.3.0
 
