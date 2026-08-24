@@ -123,11 +123,13 @@ end
 
 # Numbers
 
-# If they're both numbers but not the same type, convert them explicitly.
-function from_dict(::Type{T}, v::AbstractFloat; kwargs...) where {T <: AbstractFloat}
+# YAML and JSON distinguish integer and floating-point literals, but the requested Julia
+# type determines the representation we ultimately want. Julia's `convert` also preserves
+# its usual range and exactness checks for conversions such as Float64 to Int8.
+function from_dict(::Type{T}, v::Real; kwargs...) where {T <: Integer}
     return convert(T, v)
 end
-function from_dict(::Type{T}, v::Int, kwargs...) where {T <: Int}
+function from_dict(::Type{T}, v::Real; kwargs...) where {T <: AbstractFloat}
     return convert(T, v)
 end
 
@@ -160,8 +162,8 @@ end
 # String-Like
 
 # Chars can come from strings.
-function from_dict(t::Type{<:AbstractChar}, v::String; kwargs...)
-    return only(v)
+function from_dict(::Type{T}, v::String; kwargs...) where {T <: AbstractChar}
+    return convert(T, only(v))
 end
 
 # Enums can come from strings. Some enum packages, such as EnumX, may be written in scoped
@@ -806,11 +808,15 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
     if payload isa AbstractDict
 
         # Let any other keys in the dictionary overwrite what we loaded. (The file *doing*
-        # the including can overwrite anything that it includes.)
-        payload = OrderedDict(
-            k => haskey(d, k) ? d[k] : payload[k]
-            for k in union(keys(payload), keys(d)) if k != include_key
-        )
+        # the including can overwrite anything that it includes.) Existing keys retain
+        # their positions, while new keys are appended in the including file's order.
+        merged_payload = OrderedDict(payload)
+        for (key, value) in pairs(d)
+            if key != include_key
+                merged_payload[key] = value
+            end
+        end
+        payload = merged_payload
 
     end
 

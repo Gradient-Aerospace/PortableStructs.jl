@@ -2,8 +2,10 @@
 
 ## Unreleased
 
+* Added support for all integer, float, and char types.
 * Added `from_dict` to load Tuple from a vector in an "args" key.
 * Clarified error when general construction of the target type fails.
+* Fixed a bug where keys did not preserve their order through an `include`.
 
 ## v1.3.0
 

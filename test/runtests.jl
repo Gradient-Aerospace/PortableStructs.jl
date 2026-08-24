@@ -424,6 +424,97 @@ end
     value::ModuleA.ModuleA1.Fruit
 end
 
+@testset "integer, floating-point, and character loading" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+
+    # Parsed YAML/JSON integer values should convert to every standard concrete integer
+    # type. This also exercises keyword forwarding, which previously did not work for the
+    # narrow `Int` method.
+    integer_types = (
+        Int8,
+        Int16,
+        Int32,
+        Int64,
+        Int128,
+        BigInt,
+        UInt8,
+        UInt16,
+        UInt32,
+        UInt64,
+        UInt128,
+    )
+    for type in integer_types
+        loaded = PortableStructs.from_dict(type, Int64(7); type_key, base_module)
+        @test loaded == convert(type, 7)
+        @test loaded isa type
+    end
+
+    # Bool is an Integer subtype in Julia. Rely on `convert` to accept its two exact integer
+    # representations without treating arbitrary nonzero values as true.
+    @test PortableStructs.from_dict(Bool, Int64(0); type_key, base_module) === false
+    @test PortableStructs.from_dict(Bool, Int64(1); type_key, base_module) === true
+    @test_throws InexactError PortableStructs.from_dict(
+        Bool,
+        Int64(2);
+        type_key,
+        base_module,
+    )
+
+    # Unsigned values are written as strings so values larger than Int64 can pass through
+    # YAML and JSON parsers without overflowing their default integer representation.
+    for type in (UInt8, UInt16, UInt32, UInt64, UInt128)
+        @test PortableStructs.from_dict(
+            type,
+            string(typemax(type));
+            type_key,
+            base_module,
+        ) === typemax(type)
+    end
+
+    # Floating-point literals normally parse as Float64. Integer-valued literals are also
+    # valid inputs for floating-point fields, with `convert` producing the requested type.
+    for type in (Float16, Float32, Float64, BigFloat)
+        loaded_float = PortableStructs.from_dict(
+            type,
+            Float64(1.5);
+            type_key,
+            base_module,
+        )
+        loaded_integer = PortableStructs.from_dict(
+            type,
+            Int64(2);
+            type_key,
+            base_module,
+        )
+        @test loaded_float == convert(type, 1.5)
+        @test loaded_float isa type
+        @test loaded_integer == convert(type, 2)
+        @test loaded_integer isa type
+    end
+
+    # Exact floating-point values may initialize integer fields, while Julia's ordinary
+    # conversion error protects against silently truncating non-integral values.
+    @test PortableStructs.from_dict(Int8, 7.0; type_key, base_module) === Int8(7)
+    @test_throws InexactError PortableStructs.from_dict(
+        Int8,
+        7.5;
+        type_key,
+        base_module,
+    )
+
+    # A string must contain exactly one character, including for multi-byte Unicode text.
+    @test PortableStructs.from_dict(Char, "λ"; type_key, base_module) === 'λ'
+    @test_throws ArgumentError PortableStructs.from_dict(
+        Char,
+        "too long";
+        type_key,
+        base_module,
+    )
+
+end
+
 @testset "enums in modules" begin
     enums_in_modules_yaml = """
     value: ModuleA.ModuleA1.apple
@@ -994,6 +1085,32 @@ end
     vector_includes = load_from_yaml("vector_include.yaml")
     @test vector_includes["items"][1]["name"] == "expanded"
     @test !haskey(vector_includes["items"][1], "include")
+
+    # Included keys retain the source file's order. Overrides stay in the original key's
+    # position, and keys introduced by the including file are appended in their own order.
+    expected_key_order = ["first", "second", "third", "fourth", "fifth"]
+    yaml_include_order = PortableStructs.load_yaml_dict("include_order/nested.yaml")
+    json_include_order = PortableStructs.load_json_dict("include_order/nested.json")
+    @test collect(keys(yaml_include_order)) == expected_key_order
+    @test collect(keys(json_include_order)) == expected_key_order
+    @test collect(values(yaml_include_order)) == [10, 20, 3, 4, 5]
+    @test collect(values(json_include_order)) == [10, 20, 3, 4, 5]
+
+    # An included mapping should produce the same nested NamedTuple field order and Julia
+    # type as the equivalent inline mapping. The nested type annotation is explicit because
+    # dictionaries decoded through an untyped `Any` field remain OrderedDicts.
+    nested_named_tuple_type = NamedTuple{(:values,), Tuple{NamedTuple}}
+    inline_named_tuple = load_from_yaml(
+        "include_order/inline.yaml",
+        nested_named_tuple_type,
+    )
+    included_named_tuple = load_from_yaml(
+        "include_order/included.yaml",
+        nested_named_tuple_type,
+    )
+    @test keys(included_named_tuple.values) == (:first, :second, :third)
+    @test typeof(included_named_tuple) === typeof(inline_named_tuple)
+    @test included_named_tuple == inline_named_tuple
 
 end
 
