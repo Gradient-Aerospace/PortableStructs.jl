@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Added support for all integer, float, and char types.
 * Added `from_dict` to load Tuple from a vector in an "args" key.
 
 ## v1.3.0

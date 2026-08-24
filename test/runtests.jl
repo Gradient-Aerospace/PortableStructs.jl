@@ -417,6 +417,97 @@ end
     value::ModuleA.ModuleA1.Fruit
 end
 
+@testset "integer, floating-point, and character loading" begin
+
+    type_key = "type"
+    base_module = @__MODULE__
+
+    # Parsed YAML/JSON integer values should convert to every standard concrete integer
+    # type. This also exercises keyword forwarding, which previously did not work for the
+    # narrow `Int` method.
+    integer_types = (
+        Int8,
+        Int16,
+        Int32,
+        Int64,
+        Int128,
+        BigInt,
+        UInt8,
+        UInt16,
+        UInt32,
+        UInt64,
+        UInt128,
+    )
+    for type in integer_types
+        loaded = PortableStructs.from_dict(type, Int64(7); type_key, base_module)
+        @test loaded == convert(type, 7)
+        @test loaded isa type
+    end
+
+    # Bool is an Integer subtype in Julia. Rely on `convert` to accept its two exact integer
+    # representations without treating arbitrary nonzero values as true.
+    @test PortableStructs.from_dict(Bool, Int64(0); type_key, base_module) === false
+    @test PortableStructs.from_dict(Bool, Int64(1); type_key, base_module) === true
+    @test_throws InexactError PortableStructs.from_dict(
+        Bool,
+        Int64(2);
+        type_key,
+        base_module,
+    )
+
+    # Unsigned values are written as strings so values larger than Int64 can pass through
+    # YAML and JSON parsers without overflowing their default integer representation.
+    for type in (UInt8, UInt16, UInt32, UInt64, UInt128)
+        @test PortableStructs.from_dict(
+            type,
+            string(typemax(type));
+            type_key,
+            base_module,
+        ) === typemax(type)
+    end
+
+    # Floating-point literals normally parse as Float64. Integer-valued literals are also
+    # valid inputs for floating-point fields, with `convert` producing the requested type.
+    for type in (Float16, Float32, Float64, BigFloat)
+        loaded_float = PortableStructs.from_dict(
+            type,
+            Float64(1.5);
+            type_key,
+            base_module,
+        )
+        loaded_integer = PortableStructs.from_dict(
+            type,
+            Int64(2);
+            type_key,
+            base_module,
+        )
+        @test loaded_float == convert(type, 1.5)
+        @test loaded_float isa type
+        @test loaded_integer == convert(type, 2)
+        @test loaded_integer isa type
+    end
+
+    # Exact floating-point values may initialize integer fields, while Julia's ordinary
+    # conversion error protects against silently truncating non-integral values.
+    @test PortableStructs.from_dict(Int8, 7.0; type_key, base_module) === Int8(7)
+    @test_throws InexactError PortableStructs.from_dict(
+        Int8,
+        7.5;
+        type_key,
+        base_module,
+    )
+
+    # A string must contain exactly one character, including for multi-byte Unicode text.
+    @test PortableStructs.from_dict(Char, "λ"; type_key, base_module) === 'λ'
+    @test_throws ArgumentError PortableStructs.from_dict(
+        Char,
+        "too long";
+        type_key,
+        base_module,
+    )
+
+end
+
 @testset "enums in modules" begin
     enums_in_modules_yaml = """
     value: ModuleA.ModuleA1.apple
