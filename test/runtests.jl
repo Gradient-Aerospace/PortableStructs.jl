@@ -156,6 +156,13 @@ struct FieldMatchingButNoFieldConstructor
     FieldMatchingButNoFieldConstructor(x::String) = new(parse(Int, x))
 end
 
+# Julia's `Symbol` constructor accepts most values by printing them. This key exercises the
+# remaining case where that conversion itself fails.
+struct InvalidFieldKey end
+function Base.print(::IO, ::InvalidFieldKey)
+    error("InvalidFieldKey cannot be printed as a Symbol.")
+end
+
 function a_function_to_call(; x::Int64, y::String)
     return (x, y)
 end
@@ -827,16 +834,49 @@ end
     @test unit_range isa UnitRange{Int}
 
     # Positional fallback should stay narrow: extra or missing keys mean the dict does not
-    # unambiguously map to the type's fields.
-    @test_throws "Could not construct" PortableStructs.from_dict(
-        PositionalOnly,
-        OrderedDict(
-            "a" => "5",
-            "b" => tagged_leaf,
-            "extra" => true,
-        );
-        type_key,
-        base_module,
+    # unambiguously map to the type's fields. The error should identify the mismatch without
+    # dumping the dictionary or suggesting a type tag for an already-known concrete type.
+    mismatched_fields = OrderedDict(
+        "a" => "5",
+        "extra" => true,
+    )
+    mismatch_error = try
+        PortableStructs.from_dict(
+            PositionalOnly,
+            mismatched_fields;
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test mismatch_error isa ErrorException
+    mismatch_message = sprint(showerror, mismatch_error)
+    @test occursin("Supplied keys: (\"a\", \"extra\")", mismatch_message)
+    @test occursin("Expected fields: (:a, :b)", mismatch_message)
+    @test occursin("Missing fields: (:b,)", mismatch_message)
+    @test occursin("Unexpected keys: (\"extra\",)", mismatch_message)
+    @test !occursin(string(mismatched_fields), mismatch_message)
+    @test !occursin("identify it with", mismatch_message)
+
+    # Dictionary keys that cannot name Julia fields should reach the intended construction
+    # error instead of failing while PortableStructs attempts to convert a key to a Symbol.
+    invalid_key_error = try
+        PortableStructs.from_dict(
+            PositionalOnly,
+            OrderedDict{Any, Any}(InvalidFieldKey() => "5");
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test invalid_key_error isa ErrorException
+    @test occursin(
+        "Keys that cannot identify Julia fields: (InvalidFieldKey(),)",
+        sprint(showerror, invalid_key_error),
     )
 
     # Matching the field names alone is not enough; there still needs to be a positional
@@ -922,13 +962,20 @@ end
     @test ordered_dict == OrderedDict{String, Int}("a" => 1, "b" => 2)
 
     # PortableStructs should not guess a concrete type for arbitrary abstract dictionary
-    # subtypes. Users can add a specific `from_dict` method for those.
-    @test_throws "Could not construct" PortableStructs.from_dict(
-        MyAbstractDict{String, Int},
-        OrderedDict("a" => "1");
-        type_key,
-        base_module,
-    )
+    # subtypes. In this genuinely ambiguous case, identifying a concrete subtype may help.
+    abstract_error = try
+        PortableStructs.from_dict(
+            MyAbstractDict{String, Int},
+            OrderedDict("a" => "1");
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test abstract_error isa ErrorException
+    @test occursin("identify it with a \"type\" key", sprint(showerror, abstract_error))
 
 end
 
@@ -940,6 +987,28 @@ end
         type_key => "TaggedConfigLeaf",
         "x" => 4,
     )
+
+    # If a supplied tag resolves to a concrete type whose fields do not match, the error
+    # should explain that mismatch rather than incorrectly asking for another type tag.
+    tagged_mismatch_error = try
+        PortableStructs.from_dict(
+            TaggedConfig,
+            OrderedDict(
+                type_key => "TaggedConfigLeaf",
+                "wrong" => 4,
+            );
+            type_key,
+            base_module,
+        )
+        nothing
+    catch exception
+        exception
+    end
+    @test tagged_mismatch_error isa ErrorException
+    tagged_mismatch_message = sprint(showerror, tagged_mismatch_error)
+    @test occursin("Could not construct a TaggedConfigLeaf", tagged_mismatch_message)
+    @test occursin("Unexpected keys: (\"wrong\",)", tagged_mismatch_message)
+    @test !occursin("identify it with", tagged_mismatch_message)
 
     # Tagged values should resolve to the concrete tag and still satisfy the requested
     # abstract type.

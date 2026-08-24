@@ -480,6 +480,28 @@ function constructor_arguments(::Function, dict; type_key, base_module)
     )
 end
 
+# Dictionary keys normally come from YAML or JSON as strings, but direct `from_dict` calls
+# can supply other types whose conversion to `Symbol` may fail.
+function possible_field_name(key)
+    return try
+        Symbol(key)
+    catch
+        nothing
+    end
+end
+
+function dictionary_keys_and_field_names(dict; type_key)
+    supplied_keys = Tuple(key for key in keys(dict) if key != type_key)
+    field_names = map(possible_field_name, supplied_keys)
+    return supplied_keys, field_names
+end
+
+function has_keyword_constructor(type::Type, dict; type_key)
+    _, field_names = dictionary_keys_and_field_names(dict; type_key)
+    any(isnothing, field_names) && return false
+    return hasmethod(type, Tuple{}, field_names)
+end
+
 function keys_matching_fieldnames(type::Type, dict; type_key)
 
     field_names = try
@@ -488,18 +510,14 @@ function keys_matching_fieldnames(type::Type, dict; type_key)
         return nothing
     end
 
-    candidate_keys = [key for key in keys(dict) if key != type_key]
+    candidate_keys, candidate_field_names = dictionary_keys_and_field_names(dict; type_key)
     if length(candidate_keys) != length(field_names)
         return nothing
     end
+    any(isnothing, candidate_field_names) && return nothing
 
     keys_by_field = Dict{Symbol, Any}()
-    for key in candidate_keys
-        field_name = try
-            Symbol(key)
-        catch
-            return nothing
-        end
+    for (key, field_name) in zip(candidate_keys, candidate_field_names)
         if haskey(keys_by_field, field_name)
             return nothing
         end
@@ -539,6 +557,68 @@ function positional_constructor_arguments(type::Type, dict; type_key, base_modul
         No positional constructor accepts the decoded argument types $arg_types.
         """
     )
+
+end
+
+function dictionary_construction_error_message(type::Type, dict; type_key)
+
+    supplied_keys, supplied_field_names = dictionary_keys_and_field_names(dict; type_key)
+    invalid_keys = Tuple(
+        key for (key, field_name) in zip(supplied_keys, supplied_field_names)
+        if isnothing(field_name)
+    )
+    valid_field_names = Tuple(
+        field_name for field_name in supplied_field_names if !isnothing(field_name)
+    )
+    lines = [
+        "Could not construct a $type from a dictionary.",
+        "",
+        "Supplied keys: $supplied_keys",
+        "No keyword constructor accepts the supplied keys.",
+    ]
+    !isempty(invalid_keys) && push!(
+        lines,
+        "Keys that cannot identify Julia fields: $invalid_keys",
+    )
+
+    # Positional construction is available only when the input fields match the type's
+    # fields exactly. Showing the difference is more useful than printing the input values.
+    field_names = try
+        fieldnames(type)
+    catch
+        nothing
+    end
+    if isnothing(field_names)
+        push!(
+            lines,
+            "Positional construction could not identify a field layout for $type.",
+        )
+    else
+        missing_fields = Tuple(setdiff(field_names, valid_field_names))
+        unexpected_keys = Tuple(
+            key for (key, field_name) in zip(supplied_keys, supplied_field_names)
+            if isnothing(field_name) || field_name ∉ field_names
+        )
+        push!(
+            lines,
+            "Positional construction requires the supplied keys to match the fields exactly.",
+            "Expected fields: $field_names",
+        )
+        !isempty(missing_fields) && push!(lines, "Missing fields: $missing_fields")
+        !isempty(unexpected_keys) && push!(lines, "Unexpected keys: $unexpected_keys")
+    end
+
+    # A type tag is useful when no concrete type can be inferred. It does not help repair
+    # a dictionary whose fields simply do not match an already-known concrete type.
+    if type === Any || isabstracttype(type)
+        push!(
+            lines,
+            "If this dictionary represents a concrete subtype, identify it with a " *
+            "\"$type_key\" key.",
+        )
+    end
+
+    return join(lines, '\n')
 
 end
 
@@ -583,7 +663,7 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
             for (k, v) in pairs(dict) if k != type_key
         )
 
-    elseif hasmethod(T, Tuple{}, Tuple(Symbol(k) for k in keys(dict)))
+    elseif has_keyword_constructor(T, dict; type_key)
 
         # There's no type key, and this isn't the ordered dict special case, but it appears
         # that there's a keyword constructor for whatever it is we're looking to construct.
@@ -606,15 +686,7 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
 
     end
 
-    error(
-        """
-        Could not construct a $T from the given dictionary:
-
-        $(dict)
-
-        Adding a \"$type_key\" key would help resolve which type to construct.
-        """
-    )
+    error(dictionary_construction_error_message(T, dict; type_key))
 
 end
 
