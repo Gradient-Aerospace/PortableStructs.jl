@@ -155,7 +155,7 @@ default, `base_module = Main`, which is a good match for scripts and REPL work w
 types being loaded are available from `Main`.
 
 Package code that writes its own artifacts can choose the package module as the base module
-instead. Use the same `base_module` when loading as was used when writing.
+instead, and they should usee the same `base_module` when loading.
 
 Values can also use types from modules outside the chosen `base_module`. In that case,
 PortableStructs writes the type's defining module path, such as `Dates.Date`. When loading,
@@ -164,6 +164,15 @@ there, the loader also accepts explicit roots like `Main`, `Base`, and `Core`, o
 binding with that name in `Main`. This means a file written with a given `base_module` and a
 given set of imported modules in `Main` should be loaded with the same `base_module` and the
 same imports available.
+
+When reading and resolving a type name like "A.B.C", this is the order of operations:
+
+* If the type name starts with "Main.", "Base.", or "Core.", resolution will continue from those top-level modules, regardless of the value used for `base_module`.
+* Otherwise, if the first word in the type name is available in the `base_module`, the full type will be resolved in that module.
+* Otherewise, the type will be resolved in `Main`.
+* Otherwise, the loader will throw an error.
+
+Here is an example of package code writing and reading consistently:
 
 ```
 module MyPackage
