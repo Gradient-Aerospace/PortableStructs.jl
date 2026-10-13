@@ -374,6 +374,19 @@ end
             @test load_from_yaml(filename; base_module = BareFallbackFixtures) isa
                 FallbackImportedType
         end
+
+        # A bare root has no remaining path to traverse. It must resolve to the module,
+        # then fail constructor validation rather than indexing beyond the path's end.
+        for (tag, mod) in (("Main", Main), ("Base", Base), ("Core", Core))
+            @test PortableStructs.resolve_name(
+                tag; base_module = BareFallbackFixtures,
+            ) === mod
+            write(filename, "type: $tag\n")
+            @test_throws ErrorException load_from_yaml(
+                filename; base_module = BareFallbackFixtures,
+            )
+        end
+
         write(filename, "type: MissingFallbackTestType\n")
         @test_throws ErrorException load_from_yaml(filename; base_module = EmptyBaseModule)
         @test_throws ErrorException load_from_yaml(filename; base_module = Main)
