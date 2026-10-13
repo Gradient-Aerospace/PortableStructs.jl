@@ -353,42 +353,28 @@ end
 # Construction of General Types #
 #################################
 
-# This returns the module to use for qualifying a module name for a given type, like
-# `Main.A.B.MyType` or `Dates.Date`. It returns nothing if it can't figure out where the
-# given module is defined.
-function root_module_binding(name::AbstractString)
-
-    # See if it's one of the special case modules.
-    if name == "Main"
-        return Main
-    elseif name == "Base"
-        return Base
-    elseif name == "Core"
-        return Core
-    end
-
-    # Julia does not expose a public API for looking up an arbitrary loaded root module by
-    # name. However, when users write values from a script or REPL, imported packages and
-    # stdlibs are normally available as module bindings in Main. That is enough to resolve
-    # canonical tags like `Dates.Date` without depending on Base.root_module.
-    binding_symbol = Symbol(name)
-    if isdefined(Main, binding_symbol)
-        binding = getfield(Main, binding_symbol)
-        if binding isa Module && nameof(binding) == binding_symbol
-            return binding
+function resolve_name(mod::Module, path, index, name)
+    symbol = path[index]
+    if isdefined(mod, symbol)
+        thing = getfield(mod, symbol)
+        if index == length(path) # We've found the end.
+            return thing
+        elseif thing isa Module # It's not the end, so this should be a module.
+            return resolve_name(thing, path, index + 1, name)
+        else
+            error("Error while resolving $name. No $symbol module was available in $mod.")
         end
     end
-
-    return nothing
-
+    error("Error while resolving $name. No $symbol object was available in $mod.")
 end
 
 """
     resolve_name(name; base_module)
 
 Resolve a dotted name like `"A.B.C"` by starting at `base_module` and walking through the
-named modules/bindings. If the first name is not available from `base_module`, it is also
-allowed to name a root module available from `Main`, such as `Dates`.
+named modules/bindings. If the first name is absent from `base_module`, it is sought in
+`Main`. Once that binding is chosen, the remaining path is resolved there without further
+fallback. Explicit `Main.`, `Base.`, and `Core.` paths always start from those modules.
 
 This is deliberately a tiny, isolated piece of the loader because it is the part with the
 strongest policy implications. Today, PortableStructs trusts the file and resolves names
@@ -397,47 +383,30 @@ allow-list or registry without changing how recursive conversion or construction
 """
 function resolve_name(name::AbstractString; base_module)
 
-    module_name = base_module
-    module_path = split(name, ".")
-    first_symbol = Symbol(first(module_path))
-
-    # Names are usually relative to `base_module`, but serialized values may also carry
-    # absolute Julia roots, such as `Main.A.B.x`. We handle these explicitly so absolute
-    # names always start from the intended root module, including cases like resolving
-    # `Base.x` from a `baremodule`, where `Base` is not bound.
-    root_module = root_module_binding(first(module_path))
-    first_index = if first(module_path) in ("Main", "Base", "Core")
-        module_name = root_module
-        2
-    elseif !isdefined(base_module, first_symbol) && !isnothing(root_module)
-        # A package or stdlib root, such as `Dates`, is not inside `base_module`, but it
-        # may be available from Main because the writing/loading script imported it. In
-        # that case, treat the first segment as an absolute root and keep resolving the
-        # rest of the tag from there.
-        module_name = root_module
-        2
+    # If the type string starts with "Main." or "Base." or "Core.", then they're requesting
+    # those specific modules, and we'll look there instead of in base_module.
+    #
+    # Otherwise, if there's a match for the first symbol in the given base_module, we'll
+    # look there. (Note that Base and Core will match _inside of_ base_module, and hence we
+    # check those cases first.)
+    #
+    # Otherwise, we'll fall back to looking in Main.
+    #
+    path = Symbol.(split(name, "."))
+    first_symbol = first(path)
+    load_explicit_module(mod) = length(path) == 1 ? mod : resolve_name(mod, path, 2, name)
+    if first_symbol == :Main
+        load_explicit_module(Main)
+    elseif first_symbol == :Base
+        load_explicit_module(Base)
+    elseif first_symbol == :Core
+        load_explicit_module(Core)
+    elseif isdefined(base_module, first_symbol)
+        resolve_name(base_module, path, 1, name) # from first word in the path
+    elseif isdefined(Main, first_symbol)
+        resolve_name(Main, path, 1, name)
     else
-        1
-    end
-
-    if first_index > length(module_path)
-        return module_name
-    end
-
-    for k in first_index:length(module_path)-1
-        next_symbol = Symbol(module_path[k])
-        if isdefined(module_name, next_symbol)
-            module_name = getfield(module_name, next_symbol)
-        else
-            error("Could not find the $(module_path[k]) module in the $module_name module.")
-        end
-    end
-
-    binding_symbol = Symbol(last(module_path))
-    if isdefined(module_name, binding_symbol)
-        return getfield(module_name, binding_symbol)
-    else
-        error("The $binding_symbol type/function could not be found in $module_name.")
+        resolve_name(base_module, path, 1, name) # Will result in an error.
     end
 
 end
@@ -890,7 +859,8 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the YAML is used to say which type should be used
   in construction. Default: "type".
-* `base_module`: The module to search for types called out in the YAML file. Default: Main
+* `base_module`: The module to search first for types called out in the YAML file, falling
+  back to Main when the first name is absent. Default: Main
 * `include_key`: Determines what field in the YAML is used to include another YAML file.
   Default: "include".
 """
@@ -937,7 +907,8 @@ Keyword arguments:
 
 * `type_key`: Determines what field in the JSON is used to say which type should be used
   in construction. Default: "type".
-* `base_module`: The module to search for types called out in the JSON file. Default: Main
+* `base_module`: The module to search first for types called out in the JSON file, falling
+  back to Main when the first name is absent. Default: Main
 * `include_key`: Determines what field in the JSON is used to include another JSON file.
   Default: "include".
 """
