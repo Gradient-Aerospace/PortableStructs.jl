@@ -157,7 +157,7 @@ types being loaded are available from `Main`.
 Package code that writes its own artifacts can choose the package module as the base module
 instead, and they should use the same `base_module` when loading.
 
-Values can also use types from outside the chosen `base_module`. In that case, PortableStructs writes the type's defining module path, such as `Dates.Date`. When reading and resolving a type name like "A.B.C", this is the order of operations:
+Values can also use types from outside the chosen `base_module`. If the base module imports a type under its own name, PortableStructs can write that unqualified name. Otherwise, it writes the type's defining module path, such as `Dates.Date`. When reading and resolving a type name like "A.B.C", this is the order of operations:
 
 * If the type name starts with "Main.", "Base.", or "Core.", resolution will continue from those top-level modules, regardless of the value used for `base_module`.
 * Otherwise, if the first word in the type name is available in the `base_module`, the full type will be resolved in that module.
