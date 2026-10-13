@@ -63,6 +63,41 @@ end
 module EmptyBaseModule
 end
 
+# These fixtures reproduce a script importing an exported type from another module.
+# The type and its module are both available in Main, while EmptyBaseModule knows neither.
+module MainFallbackFixtures
+    struct FallbackImportedType
+        c::String
+    end
+    export FallbackImportedType
+end
+using .MainFallbackFixtures
+
+struct FallbackMainType
+    a::Float64
+    b::Int64
+end
+
+fallback_constructor(; c) = FallbackImportedType(c)
+failing_fallback_constructor(; c) = FallbackImportedType(c)
+
+# Deliberately conflicting bindings prove that fallback never overrides the chosen base.
+module BaseFallbackFixtures
+
+    struct FallbackImportedType
+        c::String
+    end
+
+    module MainFallbackFixtures end
+    const FallbackMainType = nothing
+    failing_fallback_constructor(; c) = throw(ArgumentError("Expected constructor failure."))
+
+end
+
+# Explicit roots must also work where Julia's usual module imports aren't present.
+baremodule BareFallbackFixtures
+end
+
 # This tests reading and writing "from" a module, where the base_module is this module.
 module PackageArtifactFixtures
 
@@ -280,6 +315,70 @@ end
     @test date_dict["type"] == "Dates.Date"
     @test !isdefined(EmptyBaseModule, :Dates)
     @test load_from_yaml(date_file; base_module = EmptyBaseModule) == date
+
+end
+
+@testset "Name resolution falls back to Main only for absent first bindings" begin
+
+    mktempdir() do outdir
+
+        # Both spellings from the reported example should load the same imported type.
+        # Write the tags explicitly so the serializer cannot qualify a bare name for us.
+        filename = joinpath(outdir, "fallback.yaml")
+        for tag in ("MainFallbackFixtures.FallbackImportedType", "FallbackImportedType")
+            write(filename, "type: $tag\nc: dogs\n")
+            loaded = load_from_yaml(filename; base_module = EmptyBaseModule)
+            @test loaded isa FallbackImportedType
+            @test loaded.c == "dogs"
+        end
+
+        # A type defined directly in Main and a constructor function get the same
+        # fallback as an imported type. JSON shares this resolver with YAML.
+        write(filename, "type: FallbackMainType\na: 1.0\nb: 2\n")
+        loaded = load_from_yaml(filename; base_module = EmptyBaseModule)
+        @test loaded isa FallbackMainType
+        @test loaded.a == 1.0
+        @test loaded.b == 2
+        write(filename, "type: fallback_constructor\nc: dogs\n")
+        @test load_from_yaml(filename; base_module = EmptyBaseModule).c == "dogs"
+        json_file = joinpath(outdir, "fallback.json")
+        write(json_file, "{\"type\":\"FallbackImportedType\",\"c\":\"dogs\"}")
+        @test load_from_json(json_file; base_module = EmptyBaseModule) isa FallbackImportedType
+
+        # The base's binding wins a collision. An explicit Main path still lets users
+        # select the other type without depending on which bindings the base imports.
+        write(filename, "type: FallbackImportedType\nc: dogs\n")
+        @test load_from_yaml(filename; base_module = BaseFallbackFixtures) isa
+            BaseFallbackFixtures.FallbackImportedType
+        write(filename, "type: Main.FallbackImportedType\nc: dogs\n")
+        @test load_from_yaml(filename; base_module = BaseFallbackFixtures) isa
+            FallbackImportedType
+
+        # Finding a first binding commits to that namespace. Neither a missing child
+        # nor an unsuitable binding should cause another attempt using Main's names.
+        write(filename, "type: MainFallbackFixtures.FallbackImportedType\nc: dogs\n")
+        @test_throws ErrorException load_from_yaml(filename; base_module = BaseFallbackFixtures)
+        write(filename, "type: FallbackMainType\na: 1.0\nb: 2\n")
+        @test_throws ErrorException load_from_yaml(filename; base_module = BaseFallbackFixtures)
+
+        # The Main constructor would succeed, so preserving this error demonstrates
+        # that construction failures cannot trigger a second name-resolution attempt.
+        write(filename, "type: failing_fallback_constructor\nc: dogs\n")
+        @test_throws ArgumentError load_from_yaml(filename; base_module = BaseFallbackFixtures)
+
+        # Explicit roots bypass the custom base, even for a baremodule. An unknown name
+        # fails normally after the bounded lookup; Main as the base cannot recurse.
+        for tag in ("Main.FallbackImportedType", "Base.Main.FallbackImportedType",
+            "Core.Main.FallbackImportedType")
+            write(filename, "type: $tag\nc: dogs\n")
+            @test load_from_yaml(filename; base_module = BareFallbackFixtures) isa
+                FallbackImportedType
+        end
+        write(filename, "type: MissingFallbackTestType\n")
+        @test_throws ErrorException load_from_yaml(filename; base_module = EmptyBaseModule)
+        @test_throws ErrorException load_from_yaml(filename; base_module = Main)
+
+    end
 
 end
 
