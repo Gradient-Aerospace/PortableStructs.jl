@@ -193,6 +193,11 @@ function from_dict(t::Type{Symbol}, v::String; kwargs...)
     return Symbol(v)
 end
 
+# Regex fields accept pattern strings, including inline options such as (?i).
+function from_dict(::Type{Regex}, v::String; kwargs...)
+    return Regex(v)
+end
+
 # Parse-able
 
 # If we want some other type, and we have a string, try to parse as that type.

@@ -44,6 +44,11 @@ Base.parse(::Type{MyParseableType}, s::AbstractString) = MyParseableType(parse(I
     p::UInt64
 end
 
+# A typed expression field exercises conversion before the keyword constructor runs.
+@kwdef struct TypeWithRegex
+    expression::Regex
+end
+
 @kwdef struct TypeWithEnumX
     value::EnumXFixtures.ScopedEnum.T
 end
@@ -624,6 +629,34 @@ end
         type_key,
         base_module,
     )
+
+end
+
+@testset "regular expressions from strings" begin
+
+    # Pattern strings should compile with normal Regex matching and anchoring semantics.
+    expression = PortableStructs.from_dict(Regex, raw"apple$")
+    @test occursin(expression, "pineapple")
+    @test !occursin(expression, "apples")
+
+    # Inline options remain part of the pattern; malformed expressions must fail to load.
+    expression = PortableStructs.from_dict(Regex, "(?i)apple")
+    @test occursin(expression, "APPLE")
+    @test_throws ErrorException PortableStructs.from_dict(Regex, "[")
+
+    # Loading a tagged struct through YAML exercises field conversion before construction,
+    # rather than relying on a constructor that accepts a string in place of a Regex.
+    mktempdir() do directory
+        filename = joinpath(directory, "regex.yaml")
+        write(filename, "type: TypeWithRegex\nexpression: 'apple\$'\n")
+        loaded = load_from_yaml(filename)
+        @test loaded isa TypeWithRegex
+        @test occursin(loaded.expression, "pineapple")
+        @test !occursin(loaded.expression, "apples")
+
+        write(filename, "type: TypeWithRegex\nexpression: '['\n")
+        @test_throws ErrorException load_from_yaml(filename)
+    end
 
 end
 
