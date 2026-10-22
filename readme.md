@@ -155,15 +155,18 @@ default, `base_module = Main`, which is a good match for scripts and REPL work w
 types being loaded are available from `Main`.
 
 Package code that writes its own artifacts can choose the package module as the base module
-instead. Use the same `base_module` when loading as was used when writing.
+instead, and they should use the same `base_module` when loading.
 
-Values can also use types from modules outside the chosen `base_module`. In that case,
-PortableStructs writes the type's defining module path, such as `Dates.Date`. When loading,
-it first tries to resolve names relative to `base_module`. If the first name is not present
-there, the loader also accepts explicit roots like `Main`, `Base`, and `Core`, or a module
-binding with that name in `Main`. This means a file written with a given `base_module` and a
-given set of imported modules in `Main` should be loaded with the same `base_module` and the
-same imports available.
+Values can also use types from outside the chosen `base_module`. If the base module imports a type under its own name, PortableStructs can write that unqualified name. Otherwise, it writes the type's defining module path, such as `Dates.Date`. When reading and resolving a type name like "A.B.C", this is the order of operations:
+
+* If the type name starts with "Main.", "Base.", or "Core.", resolution will continue from those top-level modules, regardless of the value used for `base_module`.
+* Otherwise, if the first word in the type name is available in the `base_module`, the full type will be resolved in that module.
+* Otherwise, the type will be resolved in `Main`.
+* Otherwise, the loader will throw an error.
+
+A file written with a given `base_module` and a given set of imported modules in `Main` should be loaded with the same `base_module` and the same imports available.
+
+Here is an example of package code writing and reading consistently:
 
 ```
 module MyPackage
@@ -218,7 +221,7 @@ PortableStructs.load_from_yaml("date.yaml"; base_module = C)
 This package is meant to be simple, and that simplicity comes from several constraints:
 
 * The user's structs will be constructed either from keyword arguments or from positional arguments. For positional arguments, the YAML/JSON file should have a key matching each field name, and the arguments will be provided to the constructor in the order of the field names (*not* in the order in which they're encountered in the YAML/JSON file).
-* The type of each struct will show up in the YAML/JSON file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed have a field with this name.
+* The type of each struct will show up in the YAML/JSON file with a key called "type" (or whatever string is specified by the `type_key` keyword argument to `write_to_yaml` and `load_from_yaml`). Hence no struct is allowed to have a field with this name.
 * This isn't meant to be fast or efficient.
 
 There is overlap with the functionality in StructTypes, and that package is more mature than this with far more support in the package ecosystem. However, it's simpler to make an arbitrary struct work with this package (generally, the user need not do anything at all) than with StructTypes, even for fields with abstract types.

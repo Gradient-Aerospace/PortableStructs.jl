@@ -1,5 +1,11 @@
 # PortableStructs.jl Change Log
 
+## Unreleased
+
+### Non-Breaking
+
+* Added fallback for type resolution; types outside of `base_module` will be sought in `Main`.
+
 ## v1.4.0
 
 * Added support for all integer, float, and char types.
