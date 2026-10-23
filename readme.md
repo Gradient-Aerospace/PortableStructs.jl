@@ -30,6 +30,23 @@ import YAML
 my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
 ```
 
+## Regular expressions
+
+A field declared as `Regex` accepts a plain pattern string, such as
+`expression: 'apple$'`. Saving it produces a tagged representation that can also be
+loaded into an `Any` field:
+
+```yaml
+expression:
+  type: Regex
+  pattern: 'apple$'
+```
+
+Non-default `compile_options` and `match_options` are saved as decimal strings and
+restored through Julia's regex constructor. This preserves options such as
+case-insensitive matching when saving and loading an expression.
+The same representation is used for JSON. Invalid patterns raise an error when loaded.
+
 ## YAML Example
 
 Here's an example.

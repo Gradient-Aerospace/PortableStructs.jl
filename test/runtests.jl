@@ -44,6 +44,15 @@ Base.parse(::Type{MyParseableType}, s::AbstractString) = MyParseableType(parse(I
     p::UInt64
 end
 
+# A typed expression field exercises conversion before the keyword constructor runs.
+@kwdef struct TypeWithRegex
+    expression::Regex
+end
+
+@kwdef struct TypeWithAnyExpression
+    expression::Any
+end
+
 @kwdef struct TypeWithEnumX
     value::EnumXFixtures.ScopedEnum.T
 end
@@ -623,6 +632,168 @@ end
         "too long";
         type_key,
         base_module,
+    )
+
+end
+
+@testset "regular expressions from strings" begin
+
+    # A Regex field can be supplied as plain text. The trailing $ anchors the match to
+    # the end of the text, so "pineapple" matches and "apples" does not.
+    expression = PortableStructs.from_dict(Regex, raw"apple$")
+    @test occursin(expression, "pineapple")
+    @test !occursin(expression, "apples")
+
+    # Options embedded in the pattern must take effect during loading. Here, (?i)
+    # enables case-insensitive matching, so the lowercase pattern matches uppercase text.
+    expression = PortableStructs.from_dict(Regex, "(?i)apple")
+    @test occursin(expression, "APPLE")
+    # An unclosed character class is invalid; loading should report the compiler error.
+    @test_throws ErrorException PortableStructs.from_dict(Regex, "[")
+
+    # Exercise the complete YAML loading path with a field declared as Regex. Its field
+    # type tells the loader to compile the string before constructing TypeWithRegex.
+    regex_yaml = raw"""
+    type: TypeWithRegex
+    expression: 'apple$'
+    """
+    write("out/regex_string.yaml", regex_yaml)
+    loaded = load_from_yaml("out/regex_string.yaml")
+    @test loaded isa TypeWithRegex
+    @test occursin(loaded.expression, "pineapple")
+    @test !occursin(loaded.expression, "apples")
+
+    # The same invalid pattern must also raise an error when nested in a YAML field.
+    invalid_regex_yaml = """
+    type: TypeWithRegex
+    expression: '['
+    """
+    write("out/regex_invalid.yaml", invalid_regex_yaml)
+    @test_throws ErrorException load_from_yaml("out/regex_invalid.yaml")
+
+end
+
+# Constructor functions can supply a Regex field through a YAML type tag. The second
+# function returns an incompatible value to exercise the destination type check.
+make_regex(; pattern) = Regex(pattern)
+regex_pattern_length(; pattern) = length(pattern)
+
+@testset "regular expressions from constructor functions" begin
+
+    # A function-valued tag should work in both Regex and Any fields. The alternate type
+    # key exercises the same configurable tag handling used by direct type construction.
+    for type_key in ("type", "_type"), container in ("TypeWithRegex", "TypeWithAnyExpression")
+        regex_yaml = """
+        $type_key: $container
+        expression:
+          $type_key: make_regex
+          pattern: 'apple\$'
+        """
+        write("out/regex_constructor.yaml", regex_yaml)
+        loaded = load_from_yaml("out/regex_constructor.yaml"; type_key)
+        @test loaded.expression isa Regex
+        @test occursin(loaded.expression, "pineapple")
+        @test !occursin(loaded.expression, "apples")
+    end
+
+    # The function runs successfully but returns an integer. Any accepts that result;
+    # a Regex field must report the same conversion failure as generic typed loading.
+    for container in ("TypeWithRegex", "TypeWithAnyExpression")
+        regex_yaml = """
+        type: $container
+        expression:
+          type: regex_pattern_length
+          pattern: apple
+        """
+        write("out/regex_constructor_result.yaml", regex_yaml)
+        if container == "TypeWithRegex"
+            @test_throws MethodError load_from_yaml("out/regex_constructor_result.yaml")
+        else
+            loaded = load_from_yaml("out/regex_constructor_result.yaml")
+            @test loaded.expression == 5
+        end
+    end
+
+end
+
+@testset "regular expression round trips" begin
+
+    # Start with a hand-written string pattern, then save the loaded object. The saved
+    # expression should contain exactly its type and pattern when it uses default options.
+    filename = "out/regex.yaml"
+    regex_yaml = raw"""
+    type: TypeWithRegex
+    expression: 'apple$'
+    """
+    write(filename, regex_yaml)
+    original = load_from_yaml(filename)
+    write_to_yaml(filename, original)
+    saved = load_file(filename)["expression"]
+    @test saved == Dict("type" => "Regex", "pattern" => raw"apple$")
+    # Reload the saved representation and check that the end-of-text anchor still works.
+    loaded = load_from_yaml(filename)
+    @test occursin(loaded.expression, "pineapple")
+    @test !occursin(loaded.expression, "apples")
+
+    # These inputs distinguish case, line boundaries, dot matching across newlines, and
+    # ASCII versus Unicode word characters. Compare matching before and after saving.
+    # The patterns cover the i, m, s, x, and a flags individually and together, plus an
+    # inline option. Exact option comparisons also check that all option bits survive.
+    samples = ["apple", "APPLE", "pineapple", "apples", "pear\napple", "a\nb", "é"]
+    expressions = [
+        r"apple$", r"apple"i, r"^apple$"m, r"a.b"s, r"a p p l e"x,
+        r"\w+"a, r"(?i)apple", r"apple"imsxa,
+    ]
+    # YAML and JSON share the conversion methods; both formats must preserve the regex.
+    for (extension, save, load) in (
+        ("yaml", write_to_yaml, load_from_yaml),
+        ("json", write_to_json, load_from_json),
+    )
+        filename = "out/regex_roundtrip." * extension
+        for expression in expressions
+            # Cover a standalone regex and fields declared as Regex or Any. For Any,
+            # the saved type tag supplies the information needed to reconstruct a Regex.
+            for original in (
+                expression,
+                TypeWithRegex(; expression),
+                TypeWithAnyExpression(; expression),
+            )
+                # A custom type key and base module exercise the package's configurable
+                # naming rules. EmptyBaseModule makes the writer emit qualified names.
+                save(filename, original; type_key = "_type", base_module = EmptyBaseModule)
+                loaded = load(filename; type_key = "_type", base_module = EmptyBaseModule)
+                restored = loaded isa Regex ? loaded : loaded.expression
+                @test restored isa Regex
+                @test restored.pattern == expression.pattern
+                @test restored.compile_options == expression.compile_options
+                @test restored.match_options == expression.match_options
+                @test occursin.(Ref(restored), samples) ==
+                    occursin.(Ref(expression), samples)
+            end
+        end
+    end
+
+    # Check malformed structured input separately from successful round trips. Pattern
+    # syntax and option values are validated by Julia; required fields and type tags
+    # are validated by the loader.
+    type_key = "type"
+    base_module = Main
+    # An unclosed character class must fail in structured form too.
+    @test_throws ErrorException PortableStructs.from_dict(
+        Regex, Dict("pattern" => "["); type_key, base_module,
+    )
+    # The pattern is required even when the type tag is present.
+    @test_throws ErrorException PortableStructs.from_dict(
+        Regex, Dict("type" => "Regex"); type_key, base_module,
+    )
+    # A String constructor cannot accept the fields of a structured Regex.
+    @test_throws ErrorException PortableStructs.from_dict(
+        Regex, Dict("type" => "String", "pattern" => "apple"); type_key, base_module,
+    )
+    # Setting every option bit includes unsupported values that Julia must reject.
+    @test_throws ArgumentError PortableStructs.from_dict(
+        Regex, Dict("pattern" => "apple", "compile_options" => string(typemax(UInt32)));
+        type_key, base_module,
     )
 
 end
