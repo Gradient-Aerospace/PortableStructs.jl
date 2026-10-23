@@ -200,11 +200,9 @@ end
 
 function from_dict(::Type{Regex}, dict::AbstractDict; type_key, base_module, kwargs...)
 
-    # Typed fields reach this method before generic loading removes the type tag.
+    # Type and function tags use the same construction path as other typed fields.
     if haskey(dict, type_key)
-        target = resolve_constructor_tag(dict; type_key, base_module)
-        target === Regex ||
-            error("Could not construct a Regex from a \"$(dict[type_key])\" type tag.")
+        return from_tagged_dict(Regex, dict; type_key, base_module)
     end
 
     # Use Julia's default options unless the saved expression specifies its own.
@@ -639,6 +637,17 @@ function finish_decoded_value(::Type{T}, value) where {T}
     end
 end
 
+# Resolve a tagged constructor, decode its arguments, and fit its result to the
+# requested field type. Specialized loaders share this path with generic loading.
+function from_tagged_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {T}
+    target = resolve_constructor_tag(dict; type_key, base_module)
+    new_dict_without_type_key = typeof(dict)(
+        key => value for (key, value) in dict if key != type_key
+    )
+    value = from_dict(target, new_dict_without_type_key; type_key, base_module)
+    return finish_decoded_value(T, value)
+end
+
 # This is for constructing general composite types. If there's a type key, we'll use that
 # and let the resolved type or function drive construction. If there's no type key, we will
 # try keyword construction first, then positional construction when the type's field layout
@@ -647,15 +656,7 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
 
     if haskey(dict, type_key)
 
-        # There's a key that should tell us what to construct. We'll rely on `from_dict`
-        # for this, so that may result in one of the specialized `from_dict` methods. If
-        # not, we'll end up back here, but there won't be a type key to use any longer.
-        target = resolve_constructor_tag(dict; type_key, base_module)
-        new_dict_without_type_key = typeof(dict)(
-            key => value for (key, value) in dict if key != type_key
-        )
-        value = from_dict(target, new_dict_without_type_key; type_key, base_module)
-        return finish_decoded_value(T, value)
+        return from_tagged_dict(T, dict; type_key, base_module)
 
     elseif OrderedDict <: T
 

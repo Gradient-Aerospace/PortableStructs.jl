@@ -673,6 +673,49 @@ end
 
 end
 
+# Constructor functions can supply a Regex field through a YAML type tag. The second
+# function returns an incompatible value to exercise the destination type check.
+make_regex(; pattern) = Regex(pattern)
+regex_pattern_length(; pattern) = length(pattern)
+
+@testset "regular expressions from constructor functions" begin
+
+    # A function-valued tag should work in both Regex and Any fields. The alternate type
+    # key exercises the same configurable tag handling used by direct type construction.
+    for type_key in ("type", "_type"), container in ("TypeWithRegex", "TypeWithAnyExpression")
+        regex_yaml = """
+        $type_key: $container
+        expression:
+          $type_key: make_regex
+          pattern: 'apple\$'
+        """
+        write("out/regex_constructor.yaml", regex_yaml)
+        loaded = load_from_yaml("out/regex_constructor.yaml"; type_key)
+        @test loaded.expression isa Regex
+        @test occursin(loaded.expression, "pineapple")
+        @test !occursin(loaded.expression, "apples")
+    end
+
+    # The function runs successfully but returns an integer. Any accepts that result;
+    # a Regex field must report the same conversion failure as generic typed loading.
+    for container in ("TypeWithRegex", "TypeWithAnyExpression")
+        regex_yaml = """
+        type: $container
+        expression:
+          type: regex_pattern_length
+          pattern: apple
+        """
+        write("out/regex_constructor_result.yaml", regex_yaml)
+        if container == "TypeWithRegex"
+            @test_throws MethodError load_from_yaml("out/regex_constructor_result.yaml")
+        else
+            loaded = load_from_yaml("out/regex_constructor_result.yaml")
+            @test loaded.expression == 5
+        end
+    end
+
+end
+
 @testset "regular expression round trips" begin
 
     # Start with a hand-written string pattern, then save the loaded object. The saved
@@ -743,7 +786,7 @@ end
     @test_throws ErrorException PortableStructs.from_dict(
         Regex, Dict("type" => "Regex"); type_key, base_module,
     )
-    # An explicit type tag must agree with the requested Regex destination.
+    # A String constructor cannot accept the fields of a structured Regex.
     @test_throws ErrorException PortableStructs.from_dict(
         Regex, Dict("type" => "String", "pattern" => "apple"); type_key, base_module,
     )
