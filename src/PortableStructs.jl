@@ -198,6 +198,38 @@ function from_dict(::Type{Regex}, v::String; kwargs...)
     return Regex(v)
 end
 
+function from_dict(::Type{Regex}, dict::AbstractDict; type_key, base_module, kwargs...)
+
+    # Typed fields reach this method before generic loading removes the type tag.
+    if haskey(dict, type_key)
+        target = resolve_constructor_tag(dict; type_key, base_module)
+        target === Regex ||
+            error("Could not construct a Regex from a \"$(dict[type_key])\" type tag.")
+    end
+
+    # Use Julia's default options unless the saved expression specifies its own.
+    haskey(dict, "pattern") ||
+        error("Could not construct a Regex because the \"pattern\" key was missing.")
+    pattern = dict["pattern"]
+    defaults = Regex("")
+    compile_options = from_dict(
+        UInt32,
+        get(dict, "compile_options", defaults.compile_options);
+        type_key,
+        base_module,
+        kwargs...,
+    )
+    match_options = from_dict(
+        UInt32,
+        get(dict, "match_options", defaults.match_options);
+        type_key,
+        base_module,
+        kwargs...,
+    )
+    return Regex(pattern, compile_options, match_options)
+
+end
+
 # Parse-able
 
 # If we want some other type, and we have a string, try to parse as that type.
@@ -1042,6 +1074,25 @@ end
 function type_tag(v; base_module = Main)
     type = typeof(v)
     return binding_tag(type, base_module, nameof(type))
+end
+
+function to_dict(v::Regex; type_key, base_module = Main, kwargs...)
+
+    # Keep ordinary patterns readable, while preserving both compile and match options
+    # for expressions whose behavior differs from Julia's defaults.
+    dict = OrderedDict{String, Any}(
+        type_key => type_tag(v; base_module),
+        "pattern" => v.pattern,
+    )
+    defaults = Regex("")
+    if v.compile_options != defaults.compile_options
+        dict["compile_options"] = to_dict(v.compile_options; type_key, base_module, kwargs...)
+    end
+    if v.match_options != defaults.match_options
+        dict["match_options"] = to_dict(v.match_options; type_key, base_module, kwargs...)
+    end
+    return dict
+
 end
 
 # The generic write path mirrors the generic load path: emit a type tag, then emit one

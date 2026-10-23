@@ -5,6 +5,7 @@
 ### Non-Breaking
 
 * Added fallback for type resolution; types outside of `base_module` will be sought in `Main`.
+* Added loading of `Regex` fields from pattern strings and structured YAML/JSON writing and loading that preserves regex options.
 
 ## v1.4.0
 
