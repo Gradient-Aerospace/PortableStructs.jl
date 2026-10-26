@@ -193,6 +193,41 @@ function from_dict(t::Type{Symbol}, v::String; kwargs...)
     return Symbol(v)
 end
 
+# Regex fields accept pattern strings, including inline options such as (?i).
+function from_dict(::Type{Regex}, v::String; kwargs...)
+    return Regex(v)
+end
+
+function from_dict(::Type{Regex}, dict::AbstractDict; type_key, base_module, kwargs...)
+
+    # Type and function tags use the same construction path as other typed fields.
+    if haskey(dict, type_key)
+        return from_tagged_dict(Regex, dict; type_key, base_module)
+    end
+
+    # Use Julia's default options unless the saved expression specifies its own.
+    haskey(dict, "pattern") ||
+        error("Could not construct a Regex because the \"pattern\" key was missing.")
+    pattern = dict["pattern"]
+    defaults = Regex("")
+    compile_options = from_dict(
+        UInt32,
+        get(dict, "compile_options", defaults.compile_options);
+        type_key,
+        base_module,
+        kwargs...,
+    )
+    match_options = from_dict(
+        UInt32,
+        get(dict, "match_options", defaults.match_options);
+        type_key,
+        base_module,
+        kwargs...,
+    )
+    return Regex(pattern, compile_options, match_options)
+
+end
+
 # Parse-able
 
 # If we want some other type, and we have a string, try to parse as that type.
@@ -602,6 +637,17 @@ function finish_decoded_value(::Type{T}, value) where {T}
     end
 end
 
+# Resolve a tagged constructor, decode its arguments, and fit its result to the
+# requested field type. Specialized loaders share this path with generic loading.
+function from_tagged_dict(::Type{T}, dict::AbstractDict; type_key, base_module) where {T}
+    target = resolve_constructor_tag(dict; type_key, base_module)
+    new_dict_without_type_key = typeof(dict)(
+        key => value for (key, value) in dict if key != type_key
+    )
+    value = from_dict(target, new_dict_without_type_key; type_key, base_module)
+    return finish_decoded_value(T, value)
+end
+
 # This is for constructing general composite types. If there's a type key, we'll use that
 # and let the resolved type or function drive construction. If there's no type key, we will
 # try keyword construction first, then positional construction when the type's field layout
@@ -610,15 +656,7 @@ function from_dict(::Type{T}, dict::AbstractDict; type_key, base_module, kwargs.
 
     if haskey(dict, type_key)
 
-        # There's a key that should tell us what to construct. We'll rely on `from_dict`
-        # for this, so that may result in one of the specialized `from_dict` methods. If
-        # not, we'll end up back here, but there won't be a type key to use any longer.
-        target = resolve_constructor_tag(dict; type_key, base_module)
-        new_dict_without_type_key = typeof(dict)(
-            key => value for (key, value) in dict if key != type_key
-        )
-        value = from_dict(target, new_dict_without_type_key; type_key, base_module)
-        return finish_decoded_value(T, value)
+        return from_tagged_dict(T, dict; type_key, base_module)
 
     elseif OrderedDict <: T
 
@@ -1037,6 +1075,25 @@ end
 function type_tag(v; base_module = Main)
     type = typeof(v)
     return binding_tag(type, base_module, nameof(type))
+end
+
+function to_dict(v::Regex; type_key, base_module = Main, kwargs...)
+
+    # Keep ordinary patterns readable, while preserving both compile and match options
+    # for expressions whose behavior differs from Julia's defaults.
+    dict = OrderedDict{String, Any}(
+        type_key => type_tag(v; base_module),
+        "pattern" => v.pattern,
+    )
+    defaults = Regex("")
+    if v.compile_options != defaults.compile_options
+        dict["compile_options"] = to_dict(v.compile_options; type_key, base_module, kwargs...)
+    end
+    if v.match_options != defaults.match_options
+        dict["match_options"] = to_dict(v.match_options; type_key, base_module, kwargs...)
+    end
+    return dict
+
 end
 
 # The generic write path mirrors the generic load path: emit a type tag, then emit one
