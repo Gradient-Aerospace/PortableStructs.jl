@@ -33,7 +33,7 @@ jobs:
             julia-arch: x64
             os: windows-latest
           - julia-version: '1.12'
-            julia-arch: x64
+            julia-arch: aarch64
             os: macos-latest
     steps:
       - uses: actions/checkout@v4
