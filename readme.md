@@ -30,23 +30,6 @@ import YAML
 my_struct = PortableStructs.load_from_yaml("file.yaml", MyType)
 ```
 
-## Regular expressions
-
-A field declared as `Regex` accepts a plain pattern string, such as
-`expression: 'apple$'`. Saving it produces a tagged representation that can also be
-loaded into an `Any` field:
-
-```yaml
-expression:
-  type: Regex
-  pattern: 'apple$'
-```
-
-Non-default `compile_options` and `match_options` are saved as decimal strings and
-restored through Julia's regex constructor. This preserves options such as
-case-insensitive matching when saving and loading an expression.
-The same representation is used for JSON. Invalid patterns raise an error when loaded.
-
 ## YAML Example
 
 Here's an example.
@@ -100,22 +83,6 @@ MyType("My Name", Position{Float64}(1.0, 2.0, 3.0), DoingWell)
 
 The `type` can be a type or a function to call with keyword arguments.
 
-## Tuples in Untyped Fields
-
-YAML and JSON sequences normally load as vectors when the containing field does not provide
-a more specific type. A dictionary can explicitly identify a tuple and provide its values
-under `args`:
-
-```yaml
-size:
-  type: Tuple
-  args: [1024, 768]
-```
-
-Each entry under `args` is recursively decoded, so it can also contain tagged values. This
-representation is intended for hand-authored inputs; ordinary tuple serialization remains a
-plain sequence.
-
 ## JSON Example
 
 The same dictionary representation from above can be written to JSON. The JSON methods are available once `JSON` is loaded:
@@ -138,7 +105,7 @@ y = PortableStructs.load_from_json("my_struct.json", MyType)
 
 A YAML file can be "included" at any level. This allows the user to break up a large YAML file into smaller ones. By default, the key `include` will be used to indicate what file to include. The `include_key` keyword argument to `load_from_yaml` can specify a different key to use (e.g., `_include`). When including files, the file name is assumed to be relative to the file that has the "include" in it (or an absolute path).
 
-Includes can also provide `except` entries to overwrite values from the included file. Exception paths use dot-separated dictionary keys. They can also target existing vector elements with 1-based indices, matching Julia's indexing. For example, `trees[2].common_name` overwrites the `common_name` key in the second element of the `trees` vector. Vector indices must already exist; exceptions do not append to vectors or create missing vector entries.
+Includes can also provide `except` entries to overwrite values from the included file. Exception paths use dot-separated dictionary keys. They can also target existing vector elements with 1-based indices, matching Julia's indexing. For example, `trees[2].common_name` overwrites the `common_name` key in the second element of the `trees` vector. Vector indices in paths must already exist; overwrite exceptions do not append to vectors or create missing vector entries.
 
 For example, `trees.yaml` might provide shared data:
 
@@ -163,7 +130,141 @@ include:
       value: Reviewed.
 ```
 
-Loading the second file produces the included data with the second tree's common name changed and the top-level `notes` value replaced. The `trees[2]` path uses Julia-style 1-based indexing.
+Loading the second file produces the included data with the second tree's common name changed and the top-level `notes` value replaced. The `trees[2]` path uses 1-based indexing to be consistent with Julia.
+
+### Adding, Deleting, and Merging Included Data
+
+Each `except` entry can specify an `operation`. The default is `overwrite`. A `path` selects an existing value using the same dictionary keys and 1-based vector indices shown above. Omitting `path` selects the entire included value.
+
+The operations accept the following operands:
+
+| Operation | Operand | Behavior |
+| --- | --- | --- |
+| `overwrite` (default) | `value` | Replaces the selected value. |
+| `merge` | `value` | Merges a dictionary into the selected dictionary. Incoming values overwrite matching keys, and new keys are added. |
+| `add` | `values` | Adds entries to a dictionary, or appends elements to a vector. Dictionary keys must all be absent. |
+| `delete` | `keys` | Removes the listed keys from a dictionary. All keys must exist. |
+| `delete` | `indices` | Removes the listed 1-based indices from a vector. All indices must exist. |
+
+For `add`, `values` is a dictionary when adding dictionary entries and a list when appending vector elements. For `delete`, `keys` and `indices` are lists. Repeated keys or indices are harmless: the selected entries are removed once. Each add or delete checks all requested keys or indices before changing the target.
+
+For example, suppose `baseline.yaml` contains:
+
+```yaml
+settings:
+  gain: 1.0
+  obsolete_option: true
+  controller:
+    gain: 0.5
+    limit: 10
+vehicles: [alpha, bravo, charlie, delta, echo]
+```
+
+We can merge settings, add several new options, and delete an obsolete option in one including file:
+
+```yaml
+include:
+  source: baseline.yaml
+  except:
+    - path: settings
+      operation: merge
+      value:
+        gain: 2.0
+        controller: {gain: 0.8}
+    - path: settings
+      operation: add
+      values: {enabled: true, mode: cruise}
+    - path: settings
+      operation: delete
+      keys: [obsolete_option]
+```
+
+The resulting `settings` contains `gain: 2.0`, `controller: {gain: 0.8}`, `enabled: true`, and `mode: cruise`. Merge is shallow: the incoming `controller` dictionary replaces the previous one, so its old `limit` entry is discarded. Existing dictionary keys keep their positions, and new keys are appended in operand order.
+
+Vector deletions happen together, using the indices before that exception runs. We can remove the first and third vehicles, then append two more:
+
+```yaml
+include:
+  source: baseline.yaml
+  except:
+    - path: vehicles
+      operation: delete
+      indices: [1, 3]
+    - path: vehicles
+      operation: add
+      values: [foxtrot, golf]
+```
+
+The resulting `vehicles` is `[bravo, delta, echo, foxtrot, golf]`. Exceptions run in their listed order, so a later exception sees the changes made by earlier exceptions. Sibling entries alongside `include` are applied before any exceptions.
+
+An operand can itself include a file. To merge two complete dictionaries, we can omit `path` and include the second file as the merge value:
+
+```yaml
+include:
+  source: baseline.yaml
+  except:
+    - operation: merge
+      value:
+        include: overrides.yaml
+```
+
+Every top-level key in `overrides.yaml` is added to or overwrites the corresponding key from `baseline.yaml`. Relative filenames inside exception operands are resolved relative to the file containing the exception, even when the source file is in another directory.
+
+Nested includes also let us replace a value with a separate baseline and then modify that baseline:
+
+```yaml
+include:
+  source: baseline.yaml
+  except:
+    - path: settings
+      value:
+        include:
+          source: controller_settings.yaml
+          except:
+            - operation: merge
+              value: {gain: 3.0}
+```
+
+Here `settings` is replaced by the contents of `controller_settings.yaml` with `gain` set to `3.0`. The outer exception uses the default `overwrite` operation. The inner merge selects the root of the included settings because it has no `path`.
+
+The same operations are available in JSON includes. When using a custom `include_key`, nested includes use that key too; the exception fields such as `operation` and `values` retain their names.
+
+Exception entries accept only `path`, `operation`, and the operand fields listed above, so misspelled fields produce an error. Invalid include specifications, exception operations, and target paths raise `PortableStructs.IncludeError`, which reports the files being loaded and the location of the include within each file. Exception errors also identify the exception number, operation, and target path (`<root>` when the path is omitted). For nested includes, the error retains the chain of files and operations that led to the failure. These locations refer to dictionary keys and vector indices, rather than source line numbers. Parser, file-read, and unexpected errors propagate unchanged with their original exception types and backtraces.
+
+## Notes on Specific Types
+
+### Regular expressions
+
+A field declared as `Regex` accepts a plain pattern string, such as
+`expression: 'apple$'`. Saving it produces a tagged representation that can also be
+loaded into an `Any` field:
+
+```yaml
+expression:
+  type: Regex
+  pattern: 'apple$'
+```
+
+Non-default `compile_options` and `match_options` are saved as decimal strings and
+restored through Julia's regex constructor. This preserves options such as
+case-insensitive matching when saving and loading an expression.
+The same representation is used for JSON. Invalid patterns raise an error when loaded.
+
+### Tuples in Untyped Fields
+
+YAML and JSON sequences normally load as vectors when the containing field does not provide
+a more specific type. A dictionary can explicitly identify a tuple and provide its values
+under `args`:
+
+```yaml
+size:
+  type: Tuple
+  args: [1024, 768]
+```
+
+Each entry under `args` is recursively decoded, so it can also contain tagged values. This
+representation is intended for hand-authored inputs; ordinary tuple serialization remains a
+plain sequence.
 
 ## Type Names and `base_module`
 

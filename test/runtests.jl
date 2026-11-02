@@ -1421,6 +1421,346 @@ end
 
 end
 
+@testset "include exception operations" begin
+
+    # Exercise the shared include engine through both file formats, including relative
+    # paths in operands, a custom include key, and sibling overrides before exceptions.
+    mktempdir() do dir
+
+        for (extension, write_dict, load_dict) in (
+            ("yaml", PortableStructs.write_yaml_dict, PortableStructs.load_yaml_dict),
+            ("json", PortableStructs.write_json_dict, PortableStructs.load_json_dict),
+        )
+
+            mkpath(joinpath(dir, "nested"))
+            base = OrderedDict{String, Any}(
+                "settings" => OrderedDict{String, Any}(
+                    "gain" => 1,
+                    "obsolete" => true,
+                    "nested" => OrderedDict("old" => 1),
+                ),
+                "vehicles" => ["a", "b", "c", "d", "e"],
+                "notes" => "original",
+                "" => "empty key",
+            )
+            write_dict(joinpath(dir, "nested", "base.$extension"), base)
+            write_dict(
+                joinpath(dir, "overrides.$extension"),
+                OrderedDict("gain" => 2, "nested" => OrderedDict("new" => 3)),
+            )
+            exceptions = [
+                Dict("path" => "settings", "operation" => "merge", "value" => Dict(
+                    "_include" => "overrides.$extension",
+                )),
+                Dict("path" => "settings", "operation" => "add", "values" => Dict(
+                    "enabled" => true, "limit" => 10,
+                )),
+                Dict("path" => "settings", "operation" => "delete", "keys" => [
+                    "obsolete", "limit",
+                ]),
+                Dict("path" => "vehicles", "operation" => "delete", "indices" => [
+                    3, 1, 3,
+                ]),
+                Dict("path" => "vehicles", "operation" => "add", "values" => ["f", "g"]),
+                Dict("path" => "vehicles[2]", "value" => "updated"),
+                Dict("path" => "notes", "operation" => "overwrite", "value" => "final"),
+                Dict("path" => "", "value" => "still an empty key"),
+            ]
+            entry = OrderedDict(
+                "_include" => Dict(
+                    "source" => "nested/base.$extension", "except" => exceptions,
+                ),
+                "notes" => "sibling override",
+            )
+            filename = joinpath(dir, "edited.$extension")
+            write_dict(filename, entry)
+            result = load_dict(filename; include_key = "_include")
+            @test result["settings"]["gain"] == 2
+            @test collect(keys(result["settings"])) == ["gain", "nested", "enabled"]
+            @test result["settings"]["nested"] == Dict("new" => 3)
+            @test result["settings"]["enabled"] === true
+            @test result["vehicles"] == ["b", "updated", "e", "f", "g"]
+            @test result["notes"] == "final"
+            @test result[""] == "still an empty key"
+
+            # Omitting the path merges whole files, or replaces the entire payload. A
+            # root vector also supports appending and deleting without a parent mapping.
+            entry["_include"]["except"] = [Dict(
+                "operation" => "merge", "value" => Dict(
+                    "_include" => "overrides.$extension",
+                ),
+            )]
+            write_dict(filename, entry)
+            root_merge = load_dict(filename; include_key = "_include")
+            @test root_merge["gain"] == 2
+            @test root_merge["settings"]["gain"] == 1
+            @test root_merge["notes"] == "sibling override"
+            entry["_include"]["except"] = [
+                Dict("value" => [10, 20, 30]),
+                Dict("operation" => "delete", "indices" => [1, 3]),
+                Dict("operation" => "add", "values" => [40, 50]),
+            ]
+            write_dict(filename, entry)
+            @test load_dict(filename; include_key = "_include") == [20, 40, 50]
+
+        end
+
+    end
+
+    # Invalid batches must fail before changing the target. Bad operand names and target
+    # types should also produce useful errors rather than accidentally overwriting data.
+    loader = filename -> error("Unexpected file load: $filename")
+    apply = (target, exception) -> PortableStructs.expand_exception(
+        target, exception, ".", loader; include_key = "include",
+    )
+    dict = OrderedDict{String, Any}("a" => 1, "b" => 2)
+    @test_throws "absent" apply(dict, Dict(
+        "operation" => "add", "values" => OrderedDict("c" => 3, "a" => 4),
+    ))
+    @test dict == Dict("a" => 1, "b" => 2)
+    @test_throws "exist" apply(dict, Dict(
+        "operation" => "delete", "keys" => ["a", "missing"],
+    ))
+    @test dict == Dict("a" => 1, "b" => 2)
+    @test apply(deepcopy(dict), Dict(
+        "operation" => "delete", "keys" => ["a", "a"],
+    )) == Dict("b" => 2)
+    for indices in ([1, 4], [0], [-1], [1.0], [true])
+
+        vector = [10, 20, 30]
+        @test_throws "valid 1-based integer" apply(vector, Dict(
+            "operation" => "delete", "indices" => indices,
+        ))
+        @test vector == [10, 20, 30]
+
+    end
+
+    # Empty batches leave the vector alone, while deleting every index yields an empty
+    # vector. Invalid operations, operands, and targets are rejected explicitly.
+    @test apply([1, 2], Dict("operation" => "delete", "indices" => [])) == [1, 2]
+    @test isempty(apply([1, 2], Dict("operation" => "delete", "indices" => [2, 1])))
+    @test_throws "Unknown exception operation" apply(dict, Dict("operation" => "typo"))
+    @test_throws "Add requires values" apply(dict, Dict("operation" => "add", "value" => Dict()))
+    @test_throws "either keys or indices, not both" apply(dict, Dict(
+        "operation" => "delete", "keys" => [], "indices" => [],
+    ))
+    @test_throws "dictionary target" apply([1, 2], Dict("operation" => "merge", "value" => Dict()))
+    @test_throws "dictionary operand" apply(dict, Dict("operation" => "merge", "value" => [1]))
+    @test_throws "vector of values" apply([1, 2], Dict("operation" => "add", "values" => 3))
+    @test_throws "dictionary target" apply([1, 2], Dict("operation" => "delete", "keys" => []))
+    @test_throws "vector target" apply(dict, Dict("operation" => "delete", "indices" => []))
+
+    # Each operation owns its required fields and rejects operands intended for another
+    # operation. Includes must not be loaded when the selected target has the wrong type.
+    @test_throws "Overwrite requires a value" apply(dict, Dict())
+    @test_throws "Merge requires a value" apply(dict, Dict("operation" => "merge"))
+    @test_throws "Delete requires either keys or indices" apply(dict, Dict("operation" => "delete"))
+    for (operation, operand_key, operand) in (
+        ("overwrite", "value", 1),
+        ("merge", "value", Dict()),
+        ("add", "values", Dict()),
+    )
+
+        @test_throws "accepts only" apply(dict, Dict(
+            "operation" => operation, operand_key => operand, "keys" => [],
+        ))
+
+    end
+    @test_throws "Delete accepts only fields" apply(dict, Dict(
+        "operation" => "delete", "keys" => [], "value" => 1,
+    ))
+    @test_throws "dictionary target" apply([1], Dict(
+        "operation" => "merge", "value" => Dict("include" => "unused.yaml"),
+    ))
+    @test_throws "dictionary or vector target" apply(1, Dict(
+        "operation" => "add", "values" => Dict("include" => "unused.yaml"),
+    ))
+
+end
+
+@testset "include error context" begin
+
+    # A failure in a nested include should identify each file, the include's location in
+    # a vector, and the exception's number, operation, and complete target path.
+    mktempdir() do dir
+
+        for (extension, write_dict, load_dict) in (
+            ("yaml", PortableStructs.write_yaml_dict, PortableStructs.load_yaml_dict),
+            ("json", PortableStructs.write_json_dict, PortableStructs.load_json_dict),
+        )
+
+            base = joinpath(dir, "base.$extension")
+            middle = joinpath(dir, "middle.$extension")
+            main = joinpath(dir, "main.$extension")
+            write_dict(base, Dict("settings" => Dict("gain" => 1)))
+            write_dict(middle, Dict("include" => Dict(
+                "source" => "base.$extension",
+                "except" => [
+                    Dict("path" => "settings.gain", "value" => 2),
+                    Dict("path" => "settings.missing", "value" => 3),
+                ],
+            )))
+            write_dict(main, Dict("models" => [Dict("include" => "middle.$extension")]))
+            message = try
+                load_dict(main)
+                "No error"
+            catch err
+                sprint(showerror, err)
+            end
+            @test occursin(main, message)
+            @test occursin(middle, message)
+            @test occursin(base, message)
+            @test occursin("<root>[\"models\"][1]", message)
+            @test occursin("exception #2", message)
+            @test occursin("overwrite", message)
+            @test occursin("settings.missing", message)
+            @test occursin("not a valid key", message)
+
+            # Operand validation errors retain the operation context. File-read errors
+            # retain their native exception types rather than becoming include errors.
+            write_dict(main, Dict("include" => Dict(
+                "source" => "base.$extension",
+                "except" => [Dict(
+                    "path" => "settings", "operation" => "merge", "value" => 10,
+                )],
+            )))
+            failure = try
+                load_dict(main)
+                nothing
+            catch err
+                err
+            end
+            @test failure isa PortableStructs.IncludeError
+            message = sprint(showerror, failure)
+            @test occursin(main, message)
+            @test occursin("exception #1", message)
+            @test occursin("merge", message)
+            @test occursin("settings", message)
+            @test_throws SystemError load_dict(main * ".missing")
+
+        end
+
+    end
+
+    # Whitelists catch arbitrary misspelled fields, not just operands belonging to other
+    # operations. The error includes the received field names to expose the typo.
+    loader = filename -> error("Unexpected file load: $filename")
+    for (operation, operand_key, operand) in (
+        ("overwrite", "value", 1),
+        ("merge", "value", Dict()),
+        ("add", "values", Dict()),
+        ("delete", "keys", []),
+        ("delete", "indices", []),
+    )
+
+        exception = Dict("operation" => operation, operand_key => operand, "typo" => true)
+        @test_throws "typo" PortableStructs.expand_exception(
+            Dict(), exception, ".", loader; include_key = "include",
+        )
+
+    end
+
+end
+
+@testset "include error wrappers" begin
+
+    # Reusing a validation error must not accumulate context. Each attempt creates its
+    # own wrappers, whose cause chain still ends at the unchanged original exception.
+    original = PortableStructs.IncludeError("Invalid included data.")
+    loader = function(filename)
+
+        if basename(filename) == "child"
+            throw(original)
+        else
+            return Dict("include" => "child")
+        end
+
+    end
+    failures = map(1:2) do _
+
+        try
+            PortableStructs.load_include_file("main", loader)
+            nothing
+        catch err
+            err
+        end
+
+    end
+    for failure in failures
+
+        @test failure isa PortableStructs.IncludeError
+        @test failure !== original
+        @test failure.cause isa PortableStructs.IncludeError
+        @test failure.cause.cause === original
+        @test startswith(sprint(showerror, failure), "While loading ")
+        @test endswith(sprint(showerror, failure),
+            "While expanding include at <root>:\nInvalid included data.",
+        )
+
+    end
+    @test sprint(showerror, failures[1]) == sprint(showerror, failures[2])
+    @test original.cause === nothing
+    @test sprint(showerror, original) == "Invalid included data."
+
+end
+
+@testset "include errors preserve unrelated failures" begin
+
+    # A parser failure inside an operand crosses file, include-location, and exception
+    # boundaries. Every unrelated exception must emerge as the original object.
+    for original in (
+        ErrorException("parser failure"),
+        ArgumentError("parser argument failure"),
+        AssertionError("unexpected assertion"),
+        MethodError(identity, ()),
+        InterruptException(),
+    )
+
+        loader = function(filename)
+
+            if basename(filename) == "broken"
+                throw(original)
+            elseif basename(filename) == "base"
+                return Dict("settings" => Dict("gain" => 1))
+            else
+                return Dict("include" => Dict(
+                    "source" => "base",
+                    "except" => [Dict(
+                        "path" => "settings", "operation" => "merge",
+                        "value" => Dict("include" => "broken"),
+                    )],
+                ))
+            end
+
+        end
+        failure = try
+            PortableStructs.load_include_file("main", loader)
+            nothing
+        catch err
+            err
+        end
+        @test failure === original
+
+    end
+
+    # Input validation uses the dedicated exception even for malformed entries and paths.
+    loader = filename -> Dict("settings" => Dict("gain" => 1))
+    for exception in (1, Dict("path" => 1, "value" => 2))
+
+        @test_throws PortableStructs.IncludeError PortableStructs.expand_exception(
+            Dict(), exception, ".", loader; include_key = "include",
+        )
+
+    end
+    @test_throws PortableStructs.IncludeError PortableStructs.expand_include_files(
+        Dict("include" => 1), ".", loader,
+    )
+    @test_throws PortableStructs.IncludeError PortableStructs.expand_include_files(
+        Dict("include" => Dict("source" => 1)), ".", loader,
+    )
+
+end
+
 @testset "custom to_dict and from_dict" begin
 
     file = "out/my_custom_type.yaml"

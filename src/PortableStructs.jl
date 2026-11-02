@@ -701,6 +701,32 @@ end
 # Includes #
 ############
 
+"""
+    PortableStructs.IncludeError
+
+An invalid include specification, exception operation, or target path. The displayed error
+includes the file and include locations through which it propagated. Context wrappers
+retain the original exception in `cause`; a validation error has `cause === nothing`.
+Parser errors and unrelated exceptions retain their original types.
+"""
+struct IncludeError <: Exception
+    message::String
+    cause::Union{Nothing, Exception}
+end
+
+IncludeError(message::AbstractString) = IncludeError(String(message), nothing)
+
+function Base.showerror(io::IO, err::IncludeError)
+
+    # Each wrapper describes one boundary; the final cause describes the validation error.
+    print(io, err.message)
+    if !isnothing(err.cause)
+        println(io)
+        showerror(io, err.cause)
+    end
+
+end
+
 function first_exception_path_segment(path)
 
     # Try to match from the beginning of a string to the first dot, capturing everything
@@ -719,7 +745,8 @@ function key_and_index(segment)
 
     m = match(r"^([^\[\]]+)\[(\d+)\]$", segment)
     if isnothing(m)
-        @assert !occursin('[', segment) && !occursin(']', segment) "\"$segment\" is not a valid exception path segment."
+        !occursin('[', segment) && !occursin(']', segment) ||
+            throw(IncludeError("\"$segment\" is not a valid exception path segment."))
         return segment, nothing
     else
         return m.captures[1], parse(Int, m.captures[2])
@@ -728,11 +755,13 @@ function key_and_index(segment)
 end
 
 function check_exception_index(v, index, path)
-    @assert index >= 1 "While overwriting the value in \"$path\", a non-positive index was encountered, but indices should be 1-indexed."
-    @assert index <= length(v) "While overwriting the value in \"$path\", index $index was not found. Available indices: 1:$(length(v))."
+    index >= 1 ||
+        throw(IncludeError("While overwriting the value in \"$path\", a non-positive index was encountered, but indices should be 1-indexed."))
+    index <= length(v) ||
+        throw(IncludeError("While overwriting the value in \"$path\", index $index was not found. Available indices: 1:$(length(v))."))
 end
 
-function make_exception!(d::AbstractDict, path, value)
+function update_exception!(f, d::AbstractDict, path)
 
     segment, rest = first_exception_path_segment(path)
     key, index = key_and_index(segment)
@@ -743,33 +772,206 @@ function make_exception!(d::AbstractDict, path, value)
         # If there were no indices in the path...
         if isnothing(index)
 
-            # Update the element here. The element *must* exist already; adding a new key is
-            # likely a typo.
-            @assert haskey(d, key) "\"$key\" is not a valid key. Available keys: $(keys(d))."
-            d[key] = value
+            # The target must exist already; a missing key is likely a typo.
+            haskey(d, key) ||
+                throw(IncludeError("\"$key\" is not a valid key. Available keys: $(keys(d))."))
+            d[key] = f(d[key])
 
         else
 
             # There was an index, so we expect to write to an element of a vector.
-            @assert haskey(d, key) "While overwriting the value in \"$path\", the \"$key\" key was not found. Available keys: $(keys(d))."
-            @assert d[key] isa AbstractVector "While overwriting the value in \"$path\", \"$key\" is not a vector."
+            haskey(d, key) ||
+                throw(IncludeError("While overwriting the value in \"$path\", the \"$key\" key was not found. Available keys: $(keys(d))."))
+            d[key] isa AbstractVector ||
+                throw(IncludeError("While overwriting the value in \"$path\", \"$key\" is not a vector."))
             check_exception_index(d[key], index, path)
-            d[key][index] = value
+            d[key][index] = f(d[key][index])
 
         end
 
     else
 
         # Otherwise, we're not yet at the end of the path. We'll use recursion to go deeper.
-        @assert haskey(d, key) "While overwriting the value in \"$path\", the \"$key\" key was not found. Available keys: $(keys(d))."
+        haskey(d, key) ||
+            throw(IncludeError("While overwriting the value in \"$path\", the \"$key\" key was not found. Available keys: $(keys(d))."))
         target = d[key]
         if !isnothing(index)
-            @assert target isa AbstractVector "While overwriting the value in \"$path\", \"$key\" is not a vector."
+            target isa AbstractVector ||
+                throw(IncludeError("While overwriting the value in \"$path\", \"$key\" is not a vector."))
             check_exception_index(target, index, path)
             target = target[index]
         end
-        make_exception!(target, rest, value)
+        target isa AbstractDict ||
+            throw(IncludeError("Cannot traverse path $(repr(path)): the selected value is not a dictionary."))
+        update_exception!(f, target, rest)
 
+    end
+
+end
+
+# Keep the existing overwrite helper available for callers within the package.
+function make_exception!(d::AbstractDict, path, value)
+    return update_exception!(_ -> value, d, path)
+end
+
+"""
+    apply_exception(target, exception, dir, load_dict; include_key)
+
+Applies one include exception to its selected `target` and returns the updated value.
+`exception` is a dictionary with an optional `operation` string: `overwrite` (the default),
+`merge`, `add`, or `delete`. Overwrite and merge read `value`; add reads `values`; delete
+reads either `keys` or `indices`. Each operation checks its own fields and target types.
+
+Includes in `value` or `values` are expanded relative to `dir` using the format's
+`load_dict` parser and configured `include_key`. Dictionary edits mutate `target`; vector
+edits and overwrite can return a replacement, which the caller must store.
+"""
+function apply_exception(target, exception, dir, load_dict; include_key)
+
+    operation = get(exception, "operation", "overwrite")
+    if operation == "overwrite"
+
+        haskey(exception, "value") ||
+            throw(IncludeError("Overwrite requires a value."))
+        allowed = ("path", "operation", "value")
+        all(key in allowed for key in keys(exception)) ||
+            throw(IncludeError("Overwrite accepts only fields $allowed; received $(collect(keys(exception)))."))
+        return expand_include_files(exception["value"], dir, load_dict; include_key)
+
+    elseif operation == "merge"
+
+        haskey(exception, "value") ||
+            throw(IncludeError("Merge requires a value."))
+        allowed = ("path", "operation", "value")
+        all(key in allowed for key in keys(exception)) ||
+            throw(IncludeError("Merge accepts only fields $allowed; received $(collect(keys(exception)))."))
+        target isa AbstractDict ||
+            throw(IncludeError("Merge requires a dictionary target."))
+        value = expand_include_files(exception["value"], dir, load_dict; include_key)
+        value isa AbstractDict ||
+            throw(IncludeError("Dictionary merge requires a dictionary operand."))
+
+        # Merge is shallow: incoming values replace existing values at matching keys.
+        for (key, item) in pairs(value)
+            target[key] = item
+        end
+        return target
+
+    elseif operation == "add"
+
+        haskey(exception, "values") ||
+            throw(IncludeError("Add requires values."))
+        allowed = ("path", "operation", "values")
+        all(key in allowed for key in keys(exception)) ||
+            throw(IncludeError("Add accepts only fields $allowed; received $(collect(keys(exception)))."))
+        target isa AbstractDict || target isa AbstractVector ||
+            throw(IncludeError("Add requires a dictionary or vector target."))
+        values = expand_include_files(exception["values"], dir, load_dict; include_key)
+        if target isa AbstractDict
+
+            # Check every key before adding any entries, so a conflict leaves the target
+            # unchanged rather than applying only part of the batch.
+            values isa AbstractDict ||
+                throw(IncludeError("Dictionary add requires a dictionary operand."))
+            all(key -> !haskey(target, key), keys(values)) ||
+                throw(IncludeError("Dictionary add requires every supplied key to be absent."))
+            for (key, item) in pairs(values)
+                target[key] = item
+            end
+            return target
+
+        else
+
+            values isa AbstractVector ||
+                throw(IncludeError("Vector add requires a vector of values."))
+            return vcat(target, values)
+
+        end
+
+    elseif operation == "delete"
+
+        allowed = ("path", "operation", "keys", "indices")
+        all(key in allowed for key in keys(exception)) ||
+            throw(IncludeError("Delete accepts only fields $allowed; received $(collect(keys(exception)))."))
+        if haskey(exception, "keys")
+
+            !haskey(exception, "indices") ||
+                throw(IncludeError("Delete requires either keys or indices, not both."))
+            target isa AbstractDict ||
+                throw(IncludeError("Delete with keys requires a dictionary target."))
+            keys_to_delete = exception["keys"]
+            keys_to_delete isa AbstractVector ||
+                throw(IncludeError("Delete keys must be a vector."))
+            all(key -> haskey(target, key), keys_to_delete) ||
+                throw(IncludeError("Dictionary delete requires every supplied key to exist."))
+            for key in keys_to_delete
+                delete!(target, key)
+            end
+            return target
+
+        elseif haskey(exception, "indices")
+
+            target isa AbstractVector ||
+                throw(IncludeError("Delete with indices requires a vector target."))
+            indices = exception["indices"]
+            indices isa AbstractVector ||
+                throw(IncludeError("Delete indices must be a vector."))
+            valid_indices = all(indices) do index
+                index isa Integer && !(index isa Bool) && index in eachindex(target)
+            end
+            valid_indices ||
+                throw(IncludeError("Delete indices must be valid 1-based integer indices."))
+
+            # All indices refer to the original vector. Duplicates have no extra effect.
+            return target[[!(index in indices) for index in eachindex(target)]]
+
+        else
+
+            throw(IncludeError("Delete requires either keys or indices."))
+
+        end
+
+    else
+
+        throw(IncludeError("Unknown exception operation: $operation."))
+
+    end
+
+end
+
+function expand_exception(payload, exception, dir, load_dict; include_key)
+
+    exception isa AbstractDict ||
+        throw(IncludeError("Each exception must be a dictionary."))
+    if haskey(exception, "path")
+        exception["path"] isa AbstractString ||
+            throw(IncludeError("An exception path must be a string."))
+    end
+
+    # Locate the selected target, leaving all operation-specific work to apply_exception.
+    # An omitted path selects the root; an empty string selects an empty-string key.
+    apply = target -> apply_exception(target, exception, dir, load_dict; include_key)
+    if haskey(exception, "path")
+        payload isa AbstractDict ||
+            throw(IncludeError("A keyed exception path requires a dictionary root."))
+        update_exception!(apply, payload, exception["path"])
+        return payload
+    else
+        return apply(payload)
+    end
+
+end
+
+# Add context only to validation errors raised by the include engine. Parser failures
+# and unexpected errors propagate unchanged, preserving their types and backtraces.
+function load_include_file(filename, load_dict; include_key = "include")
+
+    dict = load_dict(filename)
+    try
+        return expand_include_files(dict, dirname(filename), load_dict; include_key)
+    catch err
+        err isa IncludeError || rethrow()
+        throw(IncludeError("While loading $(repr(abspath(filename))):", err))
     end
 
 end
@@ -782,7 +984,11 @@ end
 #
 function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_key)
 
-    @assert haskey(include, "source") "No source was provided for an include entry."
+    haskey(include, "source") ||
+        throw(IncludeError("No source was provided for an include entry."))
+
+    include["source"] isa AbstractString ||
+        throw(IncludeError("An include source must be a filename string."))
 
     # See if we should use the given file name (absolute path) or join it with our
     # current path. Also, remove that key.
@@ -794,8 +1000,7 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
 
     # Now do exactly the same thing that was done to get here in the first place, using
     # the parser supplied by the active format extension.
-    subdict = load_dict(filename)
-    payload = expand_include_files(subdict, dirname(filename), load_dict; include_key)
+    payload = load_include_file(filename, load_dict; include_key)
 
     # We allow structures like this:
     #
@@ -830,21 +1035,43 @@ function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_k
     # Now process the "except"s. Note that the exceptions may, themselves, have includes, so
     # we'll need to expand those.
     if haskey(include, "except")
-        for exception in include["except"]
-            expanded_value = expand_include_files(
-                exception["value"],
-                dir,
-                load_dict;
-                include_key,
-            )
-            make_exception!(payload, exception["path"], expanded_value)
+
+        include["except"] isa AbstractVector ||
+            throw(IncludeError("Include except must be a list of exceptions."))
+        for (index, exception) in enumerate(include["except"])
+
+            try
+
+                payload = expand_exception(payload, exception, dir, load_dict; include_key)
+
+            catch err
+
+                err isa IncludeError || rethrow()
+                operation = if exception isa AbstractDict
+                    get(exception, "operation", "overwrite")
+                else
+                    nothing
+                end
+                path = exception isa AbstractDict ? get(exception, "path", nothing) : nothing
+                target = isnothing(path) ? "<root>" : repr(path)
+                throw(IncludeError(
+                    "While applying exception #$index " *
+                    "(operation $(repr(operation)), path $target) " *
+                    "to include $(repr(filename)):",
+                    err,
+                ))
+
+            end
+
         end
+
     end
 
     return payload
 
 end
 
+# This just redirects the simple `include: file_name.yaml` syntax to the longer dict syntax.
 function fetch_included_file(d, dir, include::AbstractString, load_dict; include_key)
     include = Dict(
         "source" => include,
@@ -852,34 +1079,54 @@ function fetch_included_file(d, dir, include::AbstractString, load_dict; include
     return fetch_included_file(d, dir, include, load_dict; include_key)
 end
 
-# Replace "include" with a dictionary loaded from the given file name.
-function expand_include_files(d::AbstractDict, dir, load_dict; include_key = "include")
+function fetch_included_file(d, dir, include, load_dict; include_key)
+    throw(IncludeError("An include must be a filename string or a dictionary with a source."))
+end
 
-    # First, do this recursively on all elements
+# Replace "include" with a dictionary loaded from the given file name.
+function expand_include_files(
+    d::AbstractDict, dir, load_dict; include_key = "include", path = "<root>",
+)
+
+    # First, do this recursively on all elements, ignoring the include.
     for k in keys(d)
         if k != include_key
-            d[k] = expand_include_files(d[k], dir, load_dict; include_key)
+            d[k] = expand_include_files(
+                d[k], dir, load_dict; include_key, path = "$path[$(repr(k))]",
+            )
         end
     end
 
     # Now if there's an "include" in there, load that file, and expand it the same way we
     # were expanded.
     if haskey(d, include_key)
-        d = fetch_included_file(d, dir, d[include_key], load_dict; include_key)
+        try
+            d = fetch_included_file(d, dir, d[include_key], load_dict; include_key)
+        catch err
+            err isa IncludeError || rethrow()
+            throw(IncludeError("While expanding include at $path:", err))
+        end
     end
 
     # Return the possibly updated, possibly completely replaced dictionary.
     return d
 
 end
-function expand_include_files(d::Vector, dir, load_dict; include_key = "include")
-    return map(d) do v
-        expand_include_files(v, dir, load_dict; include_key)
+
+# For vectors, we need to examine the individual elements.
+function expand_include_files(
+    d::Vector, dir, load_dict; include_key = "include", path = "<root>",
+)
+    return map(eachindex(d)) do index
+        expand_include_files(d[index], dir, load_dict; include_key, path = "$path[$index]")
     end
 end
-function expand_include_files(d, dir, load_dict; include_key = "include")
+
+# No other value type can have children, so we're done and can return this value.
+function expand_include_files(d, dir, load_dict; include_key = "include", path = "<root>")
     return d
 end
+
 
 ##############
 # Extensions #
