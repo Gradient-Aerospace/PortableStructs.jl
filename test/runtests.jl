@@ -1584,6 +1584,11 @@ end
     # a vector, and the exception's number, operation, and complete target path.
     mktempdir() do dir
 
+        # A backslash exercises filename escaping on Unix too. On Windows it creates
+        # another directory level, so these remain valid paths on both platforms.
+        dir = joinpath(dir, raw"inputs\escaped")
+        mkpath(dir)
+
         for (extension, write_dict, load_dict) in (
             ("yaml", PortableStructs.write_yaml_dict, PortableStructs.load_yaml_dict),
             ("json", PortableStructs.write_json_dict, PortableStructs.load_json_dict),
@@ -1607,9 +1612,9 @@ end
             catch err
                 sprint(showerror, err)
             end
-            @test occursin(main, message)
-            @test occursin(middle, message)
-            @test occursin(base, message)
+            @test occursin(repr(main), message)
+            @test occursin(repr(middle), message)
+            @test occursin(repr(base), message)
             @test occursin("<root>[\"models\"][1]", message)
             @test occursin("exception #2", message)
             @test occursin("overwrite", message)
@@ -1632,7 +1637,7 @@ end
             end
             @test failure isa PortableStructs.IncludeError
             message = sprint(showerror, failure)
-            @test occursin(main, message)
+            @test occursin(repr(main), message)
             @test occursin("exception #1", message)
             @test occursin("merge", message)
             @test occursin("settings", message)
