@@ -17,9 +17,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - julia-version: '1.9'
-            julia-arch: x64
-            os: ubuntu-latest
           - julia-version: '1.10'
             julia-arch: x64
             os: ubuntu-latest
