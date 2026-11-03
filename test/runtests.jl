@@ -1503,6 +1503,40 @@ end
             write_dict(filename, entry)
             @test load_dict(filename; include_key = "_include") == [20, 40, 50]
 
+            # Adding elements should match an inline sequence, including its individual
+            # element types. Numeric promotion must not round large existing integers or
+            # convert incoming booleans to integers.
+            baseline_items = [9007199254740993, 2]
+            write_dict(joinpath(dir, "numbers.$extension"), Dict("items" => baseline_items))
+            for additions in ([0.5], [3.0], [3], Int[], [true], ["tail"])
+
+                write_dict(filename, Dict("include" => Dict(
+                    "source" => "numbers.$extension",
+                    "except" => [Dict(
+                        "path" => "items", "operation" => "add", "values" => additions,
+                    )],
+                )))
+                inline_filename = joinpath(dir, "inline_numbers.$extension")
+                write_dict(inline_filename, Dict("items" => Any[baseline_items...; additions...]))
+                added = load_dict(filename)
+                inline = load_dict(inline_filename)
+                @test added["items"] == inline["items"]
+                @test typeof(added["items"]) === typeof(inline["items"])
+                @test map(typeof, added["items"]) == map(typeof, inline["items"])
+                @test added["items"][1] === baseline_items[1]
+
+                # An explicitly requested integer vector should convert integral floats
+                # only during construction, after preserving the original integer values.
+                if additions == [3.0]
+
+                    target_type = NamedTuple{(:items,), Tuple{Vector{Int}}}
+                    typed = PortableStructs.from_dict(target_type, added)
+                    @test typed.items == [baseline_items...; 3]
+
+                end
+
+            end
+
         end
 
     end

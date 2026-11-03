@@ -991,7 +991,9 @@ function apply_exception(target, exception, dir, load_dict; include_key)
             if !(values isa AbstractVector)
                 throw(IncludeError("Vector add requires a vector of values."))
             end
-            return vcat(target, values)
+
+            # Collect the elements without numeric promotion, as for an inline sequence.
+            return [item for items in (target, values) for item in items]
 
         end
 

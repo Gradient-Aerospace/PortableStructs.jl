@@ -146,7 +146,7 @@ The operations accept the following operands:
 | `delete` | `keys` | Removes the listed keys from a dictionary. All keys must exist. |
 | `delete` | `indices` | Removes the listed 1-based indices from a vector. All indices must exist. |
 
-For `add`, `values` is a dictionary when adding dictionary entries and a list when appending vector elements. For `delete`, `keys` and `indices` are lists. Repeated keys or indices are harmless: the selected entries are removed once. Each add or delete checks all requested keys or indices before changing the target.
+For `add`, `values` is a dictionary when adding dictionary entries and a list when appending vector elements. Vector additions preserve values as though the combined sequence had been written directly in the YAML or JSON file. For `delete`, `keys` and `indices` are lists. Repeated keys or indices are harmless: the selected entries are removed once. Each add or delete checks all requested keys or indices before changing the target.
 
 For example, suppose `baseline.yaml` contains:
 
