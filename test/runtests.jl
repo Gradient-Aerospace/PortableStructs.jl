@@ -1414,7 +1414,7 @@ end
     @test trees["trees"][2]["scientific_name"] == "Arbutus menziesii"
     @test trees["trees"][2]["common_name"] == "madrona"
 
-    @test_throws "While overwriting the value in \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
+    @test_throws "path \"rosac7eae.malus\"" load_from_yaml("exceptions/bad_exceptions.yaml")
     @test_throws "\"arctostaphylos\" is not a valid key." load_from_yaml("exceptions/more_bad_exceptions.yaml")
     @test_throws "index 3 was not found" load_from_yaml("exceptions/bad_vector_exception.yaml")
     @test_throws "a non-positive index was encountered" load_from_yaml("exceptions/bad_zero_vector_exception.yaml")
@@ -1753,6 +1753,134 @@ end
             result = load_dict(filename)
             @test result[1]["name"] == "first"
             @test result[2]["name"] == "updated"
+
+        end
+
+    end
+
+end
+
+@testset "string and list path equivalence" begin
+
+    # String parsing should select exactly the same target as explicit segments, without
+    # changing empty keys, root indexing, or keys with trailing dots in the old grammar.
+    loader = filename -> error("Unexpected include: $filename")
+    for (data, string_path, list_path, expected) in (
+        (Dict("a" => Dict("b" => 1)), "a.b", ["a", "b"], Dict("a" => Dict("b" => 4))),
+        (Dict("a" => [1, 2]), "a[2]", Any["a", 2], Dict("a" => [1, 4])),
+        ([1, 2], "[2]", [2], [1, 4]),
+        ([Dict("a" => 1)], "[1].a", Any[1, "a"], [Dict("a" => 4)]),
+        (Dict("" => 1), "", [""], Dict("" => 4)),
+        (Dict("a." => 1), "a.", ["a."], Dict("a." => 4)),
+    )
+
+        for path in (string_path, list_path)
+
+            result = PortableStructs.expand_exception(
+                deepcopy(data), Dict("path" => path, "value" => 4), ".", loader;
+                include_key = "include",
+            )
+            @test result == expected
+
+        end
+
+    end
+
+    # Repeated or negative bracket indices remain invalid string syntax.
+    for path in ("a[1][2]", "a[-1]")
+
+        @test_throws PortableStructs.IncludeError PortableStructs.expand_exception(
+            Dict("a" => [1]), Dict("path" => path, "value" => 4), ".", loader;
+            include_key = "include",
+        )
+
+    end
+
+end
+
+@testset "literal exception path segments" begin
+
+    # Literal keys and nested keys can coexist. List paths must preserve that distinction
+    # through each operation and through dictionary/vector boundaries in both formats.
+    mktempdir() do dir
+
+        for (extension, write_dict, load_dict) in (
+            ("yaml", PortableStructs.write_yaml_dict, PortableStructs.load_yaml_dict),
+            ("json", PortableStructs.write_json_dict, PortableStructs.load_json_dict),
+        )
+
+            source = joinpath(dir, "services.$extension")
+            filename = joinpath(dir, "parent.$extension")
+            write_dict(source, Dict(
+                "services" => Dict(
+                    "api.v2" => Dict("port" => 8000),
+                    "api" => Dict("v2" => Dict("port" => 9000)),
+                ),
+                "sensor[2]" => Dict("" => 3),
+                "workers" => [Dict("gps.primary" => 1), Dict("gps.primary" => 2)],
+            ))
+            exceptions = [
+                Dict("path" => ["services", "api.v2", "port"], "value" => 8001),
+                Dict("path" => "services.api.v2.port", "value" => 9001),
+                Dict("path" => ["services", "api.v2"], "operation" => "merge",
+                    "value" => Dict("timeout" => 60)),
+                Dict("path" => ["services", "api.v2"], "operation" => "add",
+                    "values" => Dict("enabled" => true)),
+                Dict("path" => ["services", "api.v2"], "operation" => "delete",
+                    "keys" => ["timeout"]),
+                Dict("path" => ["sensor[2]", ""], "value" => 4),
+                Dict("path" => Any["workers", 2, "gps.primary"], "value" => 7),
+            ]
+            write_dict(filename, Dict("include" => Dict(
+                "source" => "services.$extension", "except" => exceptions,
+            )))
+            result = load_dict(filename)
+            @test result["services"]["api.v2"] == Dict("port" => 8001, "enabled" => true)
+            @test result["services"]["api"]["v2"]["port"] == 9001
+            @test result["sensor[2]"][""] == 4
+            @test result["workers"][1]["gps.primary"] == 1
+            @test result["workers"][2]["gps.primary"] == 7
+
+            # Bad segment types, missing keys, invalid indices, and scalar traversal
+            # should retain the full literal path and containing file in the error.
+            for path in (
+                ["missing.key"], Any["workers", 0], Any["workers", 3],
+                Any["workers", true], Any["workers", 1.5], ["workers", "2"],
+                Any[1], ["sensor[2]", "", "deeper"],
+            )
+
+                write_dict(filename, Dict("include" => Dict(
+                    "source" => "services.$extension",
+                    "except" => [Dict("path" => path, "value" => 4)],
+                )))
+                failure = try
+                    load_dict(filename)
+                    nothing
+                catch err
+                    err
+                end
+                @test failure isa PortableStructs.IncludeError
+                @test occursin(repr(filename), sprint(showerror, failure))
+
+            end
+
+            # Integer segments select root vector elements with the same assignment
+            # conversions as string paths. An empty segment list selects the root.
+            write_dict(source, [1, 2, 3])
+            for (path, value) in (([2], 4), ([2], 4.0), ([], 6))
+
+                write_dict(filename, Dict("include" => Dict(
+                    "source" => "services.$extension",
+                    "except" => [Dict("path" => path, "value" => value)],
+                )))
+                @test load_dict(filename) == (isempty(path) ? 6 : [1, 4, 3])
+
+            end
+            write_dict(filename, Dict("include" => Dict(
+                "source" => "services.$extension",
+                "except" => [Dict("path" => [2], "value" => 4.5)],
+            )))
+            @test_throws InexactError load_dict(filename)
 
         end
 
