@@ -1119,6 +1119,18 @@ end
 #
 function fetch_included_file(d, dir, include::AbstractDict, load_dict; include_key)
 
+    allowed = ("source", "except")
+    if !all(key in allowed for key in keys(include))
+        throw(
+            IncludeError(
+                """
+                Include accepts only fields $allowed;
+                received $(collect(keys(include))).
+                """
+            ),
+        )
+    end
+
     if !haskey(include, "source")
         throw(IncludeError("No source was provided for an include entry."))
     end
@@ -1234,6 +1246,11 @@ function expand_include_files(
     d::AbstractDict, dir, load_dict; include_key = "include", path = "<root>",
 )
 
+    # Each occurrence owns its containers, even when YAML aliases or a caching loader
+    # share input dictionaries. Copy before expanding children so failures leave the
+    # input intact and later edits cannot reach another path through an alias.
+    d = copy(d)
+
     # First, do this recursively on all elements, ignoring the include.
     for k in keys(d)
         if k != include_key
@@ -1256,7 +1273,7 @@ function expand_include_files(
         end
     end
 
-    # Return the possibly updated, possibly completely replaced dictionary.
+    # Return the new dictionary.
     return d
 
 end

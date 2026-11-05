@@ -1701,6 +1701,124 @@ end
 
 end
 
+@testset "include fields" begin
+
+    # A misspelled include field must fail before loading its source, with the containing
+    # filename and location retained in the diagnostic for both file formats.
+    mktempdir() do dir
+
+        for (extension, write_dict, load_dict) in (
+            ("yaml", PortableStructs.write_yaml_dict, PortableStructs.load_yaml_dict),
+            ("json", PortableStructs.write_json_dict, PortableStructs.load_json_dict),
+        )
+
+            filename = joinpath(dir, "settings.$extension")
+            write_dict(filename, Dict("worker" => Dict("include" => Dict(
+                "source" => "missing.$extension",
+                "exceppt" => [Dict("path" => "timeout_s", "value" => 60)],
+            ))))
+            failure = try
+                load_dict(filename)
+                nothing
+            catch err
+                err
+            end
+            @test failure isa PortableStructs.IncludeError
+            message = sprint(showerror, failure)
+            @test occursin("exceppt", message)
+            @test occursin(repr(filename), message)
+            @test occursin("<root>[\"worker\"]", message)
+
+        end
+
+    end
+
+end
+
+@testset "include container ownership" begin
+
+    # YAML aliases can share dictionaries and vectors. An edit through one path should
+    # leave every other occurrence unchanged, including aliases nested inside vectors.
+    mktempdir() do dir
+
+        source = joinpath(dir, "workers.yaml")
+        write(source, """
+        primary: &defaults
+          timeout_s: 60
+          retries: 3
+          queue: &queue [a, b]
+        backup: *defaults
+        queues: [*queue, *queue]
+        """)
+        raw = load_file(source)
+        @test raw["primary"] === raw["backup"]
+        @test raw["queues"][1] === raw["queues"][2]
+
+        for exception in (
+            Dict("path" => "primary", "operation" => "delete", "keys" => ["retries"]),
+            Dict("path" => "primary", "operation" => "merge", "value" => Dict("timeout_s" => 90)),
+            Dict("path" => "primary", "operation" => "add", "values" => Dict("enabled" => true)),
+            Dict("path" => "primary.timeout_s", "value" => 90),
+            Dict("path" => "primary.queue", "operation" => "delete", "indices" => [1]),
+            Dict("path" => "queues[1]", "operation" => "delete", "indices" => [1]),
+        )
+
+            filename = joinpath(dir, "edited.yaml")
+            PortableStructs.write_yaml_dict(filename, Dict("include" => Dict(
+                "source" => "workers.yaml", "except" => [exception],
+            )))
+            result = PortableStructs.load_yaml_dict(filename)
+            @test result["backup"] == raw["backup"]
+            @test result["queues"][2] == ["a", "b"]
+            @test result["primary"] !== result["backup"]
+            @test result["queues"][1] !== result["queues"][2]
+            if exception["path"] == "queues[1]"
+                @test result["queues"][1] == ["b"]
+            elseif get(exception, "operation", "overwrite") == "delete" && exception["path"] == "primary"
+                @test !haskey(result["primary"], "retries")
+            end
+
+        end
+
+    end
+
+    # A cached source and the caller's specification must survive a failure after an
+    # earlier edit succeeded. Retrying should report the same missing key, not an add
+    # conflict left over from the first attempt.
+    defaults = Dict{String, Any}("timeout_s" => 60, "retries" => 3)
+    cached = Dict("primary" => defaults, "backup" => defaults)
+    loader = filename -> cached
+    exceptions = [
+        Dict("path" => "primary", "operation" => "add", "values" => Dict("enabled" => true)),
+        Dict("path" => "primary", "operation" => "delete", "keys" => ["missing"]),
+    ]
+    specification = Dict("include" => Dict("source" => "cached.yaml", "except" => exceptions))
+    original_specification = deepcopy(specification)
+    original_cached = deepcopy(cached)
+
+    for _ in 1:2
+
+        @test_throws "every supplied key to exist" PortableStructs.expand_include_files(
+            specification, ".", loader,
+        )
+        @test cached == original_cached
+        @test specification == original_specification
+        @test cached["primary"] === cached["backup"]
+
+    end
+
+    # Success also leaves inputs intact and isolates later mutations of the result.
+    successful = Dict("include" => Dict("source" => "cached.yaml", "except" => exceptions[1:1]))
+    result = PortableStructs.expand_include_files(successful, ".", loader)
+    @test result["primary"]["enabled"] === true
+    @test result["backup"] == defaults
+    @test cached == original_cached
+    result["primary"]["timeout_s"] = 90
+    @test cached == original_cached
+    @test result["backup"]["timeout_s"] == 60
+
+end
+
 @testset "include error wrappers" begin
 
     # Reusing a validation error must not accumulate context. Each attempt creates its

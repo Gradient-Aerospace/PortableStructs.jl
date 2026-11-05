@@ -197,7 +197,9 @@ include:
 
 The resulting `vehicles` is `[bravo, delta, echo, foxtrot, golf]`. Exceptions run in their listed order, so a later exception sees the changes made by earlier exceptions. Sibling entries alongside `include` are applied before any exceptions.
 
-An operand can itself include a file. To merge two complete dictionaries, we can omit `path` and include the second file as the merge value:
+An operand can itself include a file.
+
+To merge two complete dictionaries, we can omit `path` and include the second file as the merge value:
 
 ```yaml
 include:
@@ -229,7 +231,7 @@ Here `settings` is replaced by the contents of `controller_settings.yaml` with `
 
 The same operations are available in JSON includes. When using a custom `include_key`, nested includes use that key too; the exception fields such as `operation` and `values` retain their names.
 
-Exception entries accept only `path`, `operation`, and the operand fields listed above, so misspelled fields produce an error. Invalid include specifications, exception operations, and target paths raise `PortableStructs.IncludeError`, which reports the files being loaded and the location of the include within each file. Exception errors also identify the exception number, operation, and target path (`<root>` when the path is omitted). For nested includes, the error retains the chain of files and operations that led to the failure. These locations refer to dictionary keys and vector indices, rather than source line numbers. Parser, file-read, and unexpected errors propagate unchanged with their original exception types and backtraces.
+Include specifications accept only `source` and `except`. Exception entries accept only `path`, `operation`, and the operand fields listed above, so misspelled fields produce an error. Invalid include specifications, exception operations, and target paths raise `PortableStructs.IncludeError`, which reports the files being loaded and the location of the include within each file. Exception errors also identify the exception number, operation, and target path (`<root>` when the path is omitted). For nested includes, the error retains the chain of files and operations that led to the failure. These locations refer to dictionary keys and vector indices, rather than source line numbers. Parser, file-read, and unexpected errors propagate unchanged with their original exception types and backtraces.
 
 ## Notes on Specific Types
 
