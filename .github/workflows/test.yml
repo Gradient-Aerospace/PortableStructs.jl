@@ -17,9 +17,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - julia-version: '1.9'
-            julia-arch: x64
-            os: ubuntu-latest
           - julia-version: '1.10'
             julia-arch: x64
             os: ubuntu-latest
@@ -33,14 +30,14 @@ jobs:
             julia-arch: x64
             os: windows-latest
           - julia-version: '1.12'
-            julia-arch: x64
+            julia-arch: aarch64
             os: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.julia-version }}
           arch: ${{ matrix.julia-arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1

@@ -12,10 +12,8 @@ function read_json_dict(filename::AbstractString)
 end
 
 function PortableStructs.load_json_dict(filename::AbstractString; include_key = "include")
-    dict = read_json_dict(filename)
-    return PortableStructs.expand_include_files(
-        dict,
-        dirname(filename),
+    return PortableStructs.load_include_file(
+        filename,
         read_json_dict;
         include_key,
     )
