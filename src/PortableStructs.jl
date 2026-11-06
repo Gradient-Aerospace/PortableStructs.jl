@@ -877,6 +877,46 @@ function update_exception!(f, d::AbstractDict, path)
 
 end
 
+function update_exception!(f, v::AbstractVector, path)
+
+    # Root vectors use the same indexing and assignment conversion as a keyed vector.
+    segment, rest = first_exception_path_segment(path)
+    m = match(r"^\[(\d+)\]$", segment)
+    if isnothing(m)
+        throw(
+            IncludeError(
+                """
+                A vector path must start with an index such as [2];
+                received $(repr(segment)).
+                """
+            ),
+        )
+    end
+    index = parse(Int, m.captures[1])
+    check_exception_index(v, index, path)
+
+    if isnothing(rest)
+
+        v[index] = f(v[index])
+
+    else
+
+        if !(v[index] isa AbstractDict)
+            throw(
+                IncludeError(
+                    """
+                    Cannot traverse path $(repr(path)):
+                    the selected value is not a dictionary.
+                    """
+                ),
+            )
+        end
+        update_exception!(f, v[index], rest)
+
+    end
+
+end
+
 # Keep the existing overwrite helper available for callers within the package.
 function make_exception!(d::AbstractDict, path, value)
     return update_exception!(_ -> value, d, path)
@@ -1084,8 +1124,8 @@ function expand_exception(payload, exception, dir, load_dict; include_key)
     # An omitted path selects the root; an empty string selects an empty-string key.
     apply = target -> apply_exception(target, exception, dir, load_dict; include_key)
     if haskey(exception, "path")
-        if !(payload isa AbstractDict)
-            throw(IncludeError("A keyed exception path requires a dictionary root."))
+        if !(payload isa AbstractDict || payload isa AbstractVector)
+            throw(IncludeError("An exception path requires a dictionary or vector root."))
         end
         update_exception!(apply, payload, exception["path"])
         return payload

@@ -1701,6 +1701,65 @@ end
 
 end
 
+@testset "root vector exception paths" begin
+
+    # Root vectors retain the existing 1-based indexing and assignment conversions.
+    # Both formats also support selecting a dictionary field below a root index.
+    mktempdir() do dir
+
+        for (extension, write_dict, load_dict) in (
+            ("yaml", PortableStructs.write_yaml_dict, PortableStructs.load_yaml_dict),
+            ("json", PortableStructs.write_json_dict, PortableStructs.load_json_dict),
+        )
+
+            source = joinpath(dir, "list.$extension")
+            filename = joinpath(dir, "parent.$extension")
+            write_dict(source, [1, 2, 3])
+
+            for value in (4, 4.0)
+
+                write_dict(filename, Dict("include" => Dict(
+                    "source" => "list.$extension",
+                    "except" => [Dict("path" => "[2]", "value" => value)],
+                )))
+                result = load_dict(filename)
+                @test result == [1, 4, 3]
+                @test eltype(result) === Int
+
+            end
+
+            # A fractional replacement must still fail rather than widening the vector.
+            write_dict(filename, Dict("include" => Dict(
+                "source" => "list.$extension",
+                "except" => [Dict("path" => "[2]", "value" => 4.5)],
+            )))
+            @test_throws InexactError load_dict(filename)
+
+            for path in ("[0]", "[4]", "name")
+
+                write_dict(filename, Dict("include" => Dict(
+                    "source" => "list.$extension",
+                    "except" => [Dict("path" => path, "value" => 4)],
+                )))
+                @test_throws PortableStructs.IncludeError load_dict(filename)
+
+            end
+
+            write_dict(source, [Dict("name" => "first"), Dict("name" => "second")])
+            write_dict(filename, Dict("include" => Dict(
+                "source" => "list.$extension",
+                "except" => [Dict("path" => "[2].name", "value" => "updated")],
+            )))
+            result = load_dict(filename)
+            @test result[1]["name"] == "first"
+            @test result[2]["name"] == "updated"
+
+        end
+
+    end
+
+end
+
 @testset "include fields" begin
 
     # A misspelled include field must fail before loading its source, with the containing
