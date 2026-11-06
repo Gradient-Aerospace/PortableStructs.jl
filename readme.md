@@ -134,7 +134,7 @@ Loading the second file produces the included data with the second tree's common
 
 ### Adding, Deleting, and Merging Included Data
 
-Each `except` entry can specify an `operation`. The default is `overwrite`. A `path` selects an existing value using the same dictionary keys and 1-based vector indices shown above. Omitting `path` selects the entire included value.
+Each `except` entry can specify an `operation`. The default is `overwrite`. A `path` selects an existing value using a string path or a list of literal segments as shown below. Omitting `path` selects the entire included value.
 
 The operations accept the following operands:
 
@@ -228,6 +228,8 @@ include:
 ```
 
 Here `settings` is replaced by the contents of `controller_settings.yaml` with `gain` set to `3.0`. The outer exception uses the default `overwrite` operation. The inner merge selects the root of the included settings because it has no `path`.
+
+Note that an exception's `path` argument can be a vector of keys instead of a string. E.g., `x.y[2].z` is equivalent to `[x, y, 2, z]`. Integers in the array are taken as vector indices, where as strings (even `"2"`) are treated as keys. In this way, keys can include dots if the literal key being operated on contains a dot, like `[x, ".meta", z]`.
 
 The same operations are available in JSON includes. When using a custom `include_key`, nested includes use that key too; the exception fields such as `operation` and `values` retain their names.
 

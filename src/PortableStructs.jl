@@ -781,137 +781,102 @@ function check_exception_index(v, index, path)
 
 end
 
-function update_exception!(f, d::AbstractDict, path)
+function exception_path_segments(path::AbstractString)
 
-    segment, rest = first_exception_path_segment(path)
-    key, index = key_and_index(segment)
+    # Preserve the string grammar while separating keys from indices. An empty string
+    # remains a literal key; only an explicit empty list selects the root.
+    segments = Any[]
+    remaining = path
 
-    # If we're at the end of the path...
-    if isnothing(rest)
+    while !isnothing(remaining)
 
-        # If there were no indices in the path...
-        if isnothing(index)
+        segment, remaining = first_exception_path_segment(remaining)
+        root_index = isempty(segments) ? match(r"^\[(\d+)\]$", segment) : nothing
+        if !isnothing(root_index)
 
-            # The target must exist already; a missing key is likely a typo.
-            if !haskey(d, key)
-                throw(
-                    IncludeError(
-                        """
-                        "$key" is not a valid key.
-                        Available keys: $(keys(d)).
-                        """
-                    ),
-                )
-            end
-            d[key] = f(d[key])
+            push!(segments, parse(Int, root_index.captures[1]))
 
         else
 
-            # There was an index, so we expect to write to an element of a vector.
-            if !haskey(d, key)
-                throw(
-                    IncludeError(
-                        """
-                        While overwriting the value in "$path",
-                        the "$key" key was not found.
-                        Available keys: $(keys(d)).
-                        """
-                    ),
-                )
+            key, index = key_and_index(segment)
+            push!(segments, key)
+            if !isnothing(index)
+                push!(segments, index)
             end
-            if !(d[key] isa AbstractVector)
-                throw(
-                    IncludeError(
-                        """
-                        While overwriting the value in "$path", "$key" is not a vector.
-                        """
-                    ),
-                )
-            end
-            check_exception_index(d[key], index, path)
-            d[key][index] = f(d[key][index])
 
         end
-
-    else
-
-        # Otherwise, we're not yet at the end of the path. We'll use recursion to go deeper.
-        if !haskey(d, key)
-            throw(
-                IncludeError(
-                    """
-                    While overwriting the value in "$path",
-                    the "$key" key was not found.
-                    Available keys: $(keys(d)).
-                    """
-                ),
-            )
-        end
-        target = d[key]
-        if !isnothing(index)
-            if !(target isa AbstractVector)
-                throw(
-                    IncludeError(
-                        """
-                        While overwriting the value in "$path", "$key" is not a vector.
-                        """
-                    ),
-                )
-            end
-            check_exception_index(target, index, path)
-            target = target[index]
-        end
-        if !(target isa AbstractDict)
-            throw(
-                IncludeError(
-                    """
-                    Cannot traverse path $(repr(path)):
-                    the selected value is not a dictionary.
-                    """
-                ),
-            )
-        end
-        update_exception!(f, target, rest)
 
     end
+
+    return segments
 
 end
 
-function update_exception!(f, v::AbstractVector, path)
+function update_exception!(f, target, path::AbstractString)
+    return update_exception!(f, target, exception_path_segments(path))
+end
 
-    # Root vectors use the same indexing and assignment conversion as a keyed vector.
-    segment, rest = first_exception_path_segment(path)
-    m = match(r"^\[(\d+)\]$", segment)
-    if isnothing(m)
-        throw(
-            IncludeError(
-                """
-                A vector path must start with an index such as [2];
-                received $(repr(segment)).
-                """
-            ),
-        )
-    end
-    index = parse(Int, m.captures[1])
-    check_exception_index(v, index, path)
+function update_exception!(f, target, path::AbstractVector)
 
-    if isnothing(rest)
+    # List segments are literal: strings select dictionary keys and integers select
+    # vector elements. In particular, dots and brackets in a string have no special role.
+    for (position, segment) in enumerate(path)
 
-        v[index] = f(v[index])
+        if target isa AbstractDict
 
-    else
+            if !(segment isa AbstractString)
+                throw(
+                    IncludeError(
+                        """
+                        Dictionary path segments must be strings;
+                        received $(repr(segment)).
+                        """
+                    ),
+                )
+            end
+            if !haskey(target, segment)
+                throw(
+                    IncludeError(
+                        """
+                        $(repr(segment)) is not a valid key.
+                        Available keys: $(keys(target)).
+                        """
+                    ),
+                )
+            end
 
-        if !(v[index] isa AbstractDict)
+        elseif target isa AbstractVector
+
+            if !(segment isa Integer) || segment isa Bool
+                throw(
+                    IncludeError(
+                        """
+                        Vector path segments must be integer indices;
+                        received $(repr(segment)).
+                        """
+                    ),
+                )
+            end
+            check_exception_index(target, segment, path)
+
+        else
+
             throw(
                 IncludeError(
                     """
-                    Cannot traverse path $(repr(path)):
-                    the selected value is not a dictionary.
+                    Cannot traverse segment #$position of $(repr(path)):
+                    the selected value is not a dictionary or vector.
                     """
                 ),
             )
+
         end
-        update_exception!(f, v[index], rest)
+
+        if position == length(path)
+            target[segment] = f(target[segment])
+        else
+            target = target[segment]
+        end
 
     end
 
@@ -1115,8 +1080,8 @@ function expand_exception(payload, exception, dir, load_dict; include_key)
         throw(IncludeError("Each exception must be a dictionary."))
     end
     if haskey(exception, "path")
-        if !(exception["path"] isa AbstractString)
-            throw(IncludeError("An exception path must be a string."))
+        if !(exception["path"] isa AbstractString || exception["path"] isa AbstractVector)
+            throw(IncludeError("An exception path must be a string or a list of segments."))
         end
     end
 
@@ -1124,6 +1089,9 @@ function expand_exception(payload, exception, dir, load_dict; include_key)
     # An omitted path selects the root; an empty string selects an empty-string key.
     apply = target -> apply_exception(target, exception, dir, load_dict; include_key)
     if haskey(exception, "path")
+        if exception["path"] isa AbstractVector && isempty(exception["path"])
+            return apply(payload)
+        end
         if !(payload isa AbstractDict || payload isa AbstractVector)
             throw(IncludeError("An exception path requires a dictionary or vector root."))
         end
