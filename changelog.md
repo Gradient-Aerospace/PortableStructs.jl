@@ -4,7 +4,7 @@
 
 ### Non-Breaking
 
-* Added support for overwriting a "bare" vector as an include-exception: `except: {path: "[2]", value: 4}`.
+* Added support for overwriting a "bare" vector as an include-exception: `except: [{path: "[2]", value: 4}]`.
 * Added merge, add, and batch delete operations to include exceptions, with optional paths for editing the entire included value.
 * Added fallback for type resolution; types outside of `base_module` will be sought in `Main`.
 * Added loading of `Regex` fields from pattern strings and structured YAML/JSON writing and loading that preserves regex options.
