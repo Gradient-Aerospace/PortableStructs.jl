@@ -1,6 +1,6 @@
 # PortableStructs.jl Change Log
 
-## Unreleased
+## v1.5.0
 
 ### Non-Breaking
 
